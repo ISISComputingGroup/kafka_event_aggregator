@@ -1,0 +1,72 @@
+name: Build
+on: [push, workflow_call]
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    runs-on: "windows-latest"
+    steps:
+      - uses: actions/checkout@v5
+      - name: install stable rust
+        run: rustup install stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy -- --deny warnings
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ "ubuntu-latest", "windows-latest" ]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v5
+      - name: install stable rust
+        run: rustup install stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+      - name: Unit tests
+        run: cargo test
+      - name: Unit tests (release mode)
+        run: cargo test --release
+      - name: Build (debug)
+        run: cargo build
+      - name: Build (release)
+        run: cargo build --release
+      - name: Upload artifacts (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ format('debug-{0}', matrix.os) }}
+          path: |
+            target/debug/kafka_event_aggregator
+            target/debug/kafka_event_aggregator.exe
+            target/debug/kafka_event_aggregator.pdb
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload artifacts (release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ format('release-{0}', matrix.os) }}
+          path: |
+            target/release/kafka_event_aggregator
+            target/release/kafka_event_aggregator.exe
+            target/release/kafka_event_aggregator.pdb
+          if-no-files-found: error
+          retention-days: 1
+  results:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: Final Results
+    needs: [tests, lint]
+    steps:
+    - run: exit 1
+      # see https://stackoverflow.com/a/67532120/4907315
+      if: >-
+          ${{
+               contains(needs.*.result, 'failure')
+            || contains(needs.*.result, 'cancelled')
+          }}
