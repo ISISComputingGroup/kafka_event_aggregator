@@ -1,6 +1,7 @@
 #[allow(non_snake_case)]
 #[path = "flatbuffers_generated/ev44_events_generated.rs"]
 #[allow(clippy::all)]
+#[rustfmt::skip]
 pub mod ev44_events_generated;
 
 use crate::ev44_events_generated::{
