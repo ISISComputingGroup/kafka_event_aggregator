@@ -9,6 +9,8 @@ jobs:
     runs-on: "windows-latest"
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: 'recursive'
       - uses: Nugine/setup-flatc@e7855e994773ce90094a3f1626d4afc9080c23ae
         with:
           version: "25.12.19"
@@ -27,6 +29,8 @@ jobs:
       fail-fast: false
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: 'recursive'
       - uses: Nugine/setup-flatc@e7855e994773ce90094a3f1626d4afc9080c23ae
         with:
           version: "25.12.19"
