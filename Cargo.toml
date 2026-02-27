@@ -1,0 +1,11 @@
+[package]
+name = "kafka_event_aggregator"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+flatc-rust = "0.2.0"
+
+[dependencies]
+flatbuffers = "25.12.19"
+itertools = "0.14.0"
