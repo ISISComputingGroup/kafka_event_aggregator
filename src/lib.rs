@@ -58,7 +58,7 @@ impl Frame {
         fbb.reset();
     }
 
-    fn to_ev44_messages<'a, 'b, F>(
+    fn to_ev44_messages<'a, F>(
         &self,
         fbb: &mut FlatBufferBuilder<'a>,
         max_events_per_message: usize,
@@ -74,8 +74,8 @@ impl Frame {
 
 #[cfg(test)]
 mod tests {
-    use crate::ev44_events_generated::root_as_event_44_message;
     use super::*;
+    use crate::ev44_events_generated::root_as_event_44_message;
 
     #[test]
     fn test_to_ev44_messages() {
@@ -105,13 +105,25 @@ mod tests {
         assert_eq!(captured_messages.len(), 2);
 
         let event1 = root_as_event_44_message(&captured_messages[0]).unwrap();
-        assert_eq!(event1.pixel_id().unwrap().iter().collect::<Vec<_>>(), vec![0, 2]);
-        assert_eq!(event1.time_of_flight().unwrap().iter().collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(
+            event1.pixel_id().unwrap().iter().collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+        assert_eq!(
+            event1.time_of_flight().unwrap().iter().collect::<Vec<_>>(),
+            vec![1, 3]
+        );
         assert_eq!(event1.reference_time().iter().next(), Some(123456));
 
         let event2 = root_as_event_44_message(&captured_messages[1]).unwrap();
-        assert_eq!(event2.pixel_id().unwrap().iter().collect::<Vec<_>>(), vec![5]);
-        assert_eq!(event2.time_of_flight().unwrap().iter().collect::<Vec<_>>(), vec![6]);
+        assert_eq!(
+            event2.pixel_id().unwrap().iter().collect::<Vec<_>>(),
+            vec![5]
+        );
+        assert_eq!(
+            event2.time_of_flight().unwrap().iter().collect::<Vec<_>>(),
+            vec![6]
+        );
         assert_eq!(event2.reference_time().iter().next(), Some(123456));
     }
 }

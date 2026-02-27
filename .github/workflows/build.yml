@@ -5,22 +5,6 @@ permissions:
   contents: write
 
 jobs:
-  lint:
-    runs-on: "windows-latest"
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: 'recursive'
-      - uses: Nugine/setup-flatc@e7855e994773ce90094a3f1626d4afc9080c23ae
-        with:
-          version: "25.12.19"
-      - name: install stable rust
-        run: rustup install stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Format check
-        run: cargo fmt --check
-      - name: Clippy
-        run: cargo clippy -- --deny warnings
   tests:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -47,6 +31,10 @@ jobs:
         run: cargo build
       - name: Build (release)
         run: cargo build --release
+      - name: Format check
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy -- --deny warnings
       - name: Upload artifacts (debug)
         uses: actions/upload-artifact@v4
         with:
@@ -71,7 +59,7 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     name: Final Results
-    needs: [tests, lint]
+    needs: [tests]
     steps:
     - run: exit 1
       # see https://stackoverflow.com/a/67532120/4907315
