@@ -1,11 +1,12 @@
 use std::path::Path;
 
 fn main() {
-    println!("cargo:rerun-if-changed=src/streaming-data-types/*");
+    println!("cargo:rerun-if-changed=src/streaming-data-types/schemas/*");
     flatc_rust::run(flatc_rust::Args {
-        inputs: &[Path::new(
-            "src/streaming-data-types/schemas/ev44_events.fbs",
-        )],
+        inputs: &[
+            Path::new("src/streaming-data-types/schemas/ev44_events.fbs"),
+            Path::new("src/streaming-data-types/schemas/pu00_pulse_metadata.fbs"),
+        ],
         out_dir: Path::new("src/flatbuffers_generated/"),
         ..Default::default()
     })

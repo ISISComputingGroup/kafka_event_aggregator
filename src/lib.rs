@@ -1,130 +1,66 @@
-#[allow(non_snake_case)]
+//! # `kafka_event_aggregator`
+//!
+//! This program _aggregates_ events from a `_rawEvents` Kafka topic, and emits
+//! events onto an `_events` topic.
+//!
+//! ## Operation
+//!
+//! When data arrives on the `_rawEvents` topic, `kafka_event_aggregator` will:
+//! - Check whether this data forms part of an existing frame. If not, a new Frame will be created,
+//!   with a time-to-live of `expiry_offset_ms`.
+//! - Append neutron events from the new data, or combine veto statuses from the new data, with the
+//!   existing or just-created frame
+//!
+//! When a frame of data's time-to-live expires, and the next `frame_queue_poll_interval` timer
+//! interval expires, `kafka_event_aggregator` will:
+//! - Sort the events in the frame by increasing time of flight
+//! - Emit a `pu00` frame metadata message to the `_events` stream
+//! - Emit zero or more `ev44` messages, each containing no more than `max_events_per_message`
+//!   neutron events per `ev44` message.
+//!
+//! ## `events` stream format
+//!
+//! Consumers of the `_events` stream may make the following assumptions:
+//! - When the stream is sorted by `message_id`, the most recently seen `pu00` message contains the
+//!   metadata relevant to the neutron events until the next `pu00` message. The messages are
+//!   emitted in order by `message_id`, using an idempotent Kafka producer, but if the `_events`
+//!   stream is distributed across multiple Kafka partitions then it is not guaranteed to be
+//!   received in order. If the `_events` stream is on a single partition, ordering by `message_id`
+//!   is equivalent to the message order in Kafka.
+//! - Events will be emitted ordered in time-of-flight, both within a single `ev44` message and
+//!   across multiple `ev44` messages within one frame.
+//! - Each `ev44` on the `_events` stream will contain at most `max_events_per_message` events
+//! - The `reference_time` of all `pu00` and `ev44` messages which make up a frame will be
+//!   identical.
+//!
+//! For the avoidance of doubt, it is **not** correct to assume that:
+//! - Each frame will only contain one `ev44`. This may be true when count rate is small, but may
+//!   not be true for instruments with a high count rate.
+//! - A frame will contain an `ev44`. If all events are vetoed, no `ev44` messages will be emitted.
+//!   (A `pu00` frame metadata message will still be emitted, containing the veto flags).
+//! - Frames will be emitted in increasing order of reference time. Due to the underlying UDP
+//!   connection from the streaming hardware, this cannot be guaranteed (but is expected to be
+//!   true *most* of the time).
+//! - A frame must be "complete" to be emitted. Due to the underlying UDP connection from the
+//!   streaming hardware, and the fact that each streaming detector may emit any number of event
+//!   messages, it is not possible to tell whether all data from a frame has been
+//!   received. It is **assumed** that all data corresponding to a frame will appear in the `events`
+//!   stream within `expiry_offset_ms` of the *first* message for that frame arriving. Events that
+//!   come in too late are dropped.
+
 #[path = "flatbuffers_generated/ev44_events_generated.rs"]
 #[allow(clippy::all)]
 #[rustfmt::skip]
+#[allow(dead_code, unused, non_snake_case)]
 pub mod ev44_events_generated;
 
-use crate::ev44_events_generated::{
-    Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
-};
-use flatbuffers::FlatBufferBuilder;
+#[path = "flatbuffers_generated/pu00_pulse_metadata_generated.rs"]
+#[allow(clippy::all)]
+#[rustfmt::skip]
+#[allow(dead_code, unused, non_snake_case)]
+pub mod pu00_pulse_metadata_generated;
 
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub(crate) struct Event {
-    time_of_flight: i32,
-    pixel_id: i32,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub(crate) struct FrameMetadata {
-    vetos: u64,             // TODO: nowhere to actually put this yet
-    protons_per_pulse: f64, // TODO: nowhere to actually put this yet
-}
-
-#[derive(Debug)]
-pub(crate) struct Frame {
-    reference_time: i64,
-    events: Vec<Event>,
-}
-
-impl Frame {
-    fn sort_by_tof(&mut self) {
-        // TODO: is a stable sort faster for multiple concatenated sorted inputs? Benchmark it.
-        self.events.sort_unstable_by_key(|e| e.time_of_flight);
-    }
-
-    fn to_ev44_message<'a, 'b, F>(
-        &self,
-        fbb: &'b mut FlatBufferBuilder<'a>,
-        events: &[Event],
-        mut sink: F,
-    ) where
-        F: FnMut(&[u8]),
-    {
-        let tofs = fbb.create_vector_from_iter(events.iter().map(|e| e.time_of_flight));
-        let pixel_ids = fbb.create_vector_from_iter(events.iter().map(|e| e.pixel_id));
-
-        let args = Event44MessageArgs {
-            source_name: Some(fbb.create_string("foo")),
-            message_id: 0,
-            reference_time: Some(fbb.create_vector(&[self.reference_time])),
-            reference_time_index: Some(fbb.create_vector(&[0])),
-            time_of_flight: Some(tofs),
-            pixel_id: Some(pixel_ids),
-        };
-
-        let ev44 = Event44Message::create(fbb, &args);
-        finish_event_44_message_buffer(fbb, ev44);
-        sink(fbb.finished_data());
-        fbb.reset();
-    }
-
-    fn to_ev44_messages<'a, F>(
-        &self,
-        fbb: &mut FlatBufferBuilder<'a>,
-        max_events_per_message: usize,
-        mut sink: F,
-    ) where
-        F: FnMut(&[u8]),
-    {
-        self.events
-            .chunks(max_events_per_message)
-            .for_each(|chunk| self.to_ev44_message(fbb, chunk, &mut sink))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ev44_events_generated::root_as_event_44_message;
-
-    #[test]
-    fn test_to_ev44_messages() {
-        let mut captured_messages = vec![];
-
-        let frame = Frame {
-            events: vec![
-                Event {
-                    pixel_id: 0,
-                    time_of_flight: 1,
-                },
-                Event {
-                    pixel_id: 2,
-                    time_of_flight: 3,
-                },
-                Event {
-                    pixel_id: 5,
-                    time_of_flight: 6,
-                },
-            ],
-            reference_time: 123456,
-        };
-
-        let mut fbb = FlatBufferBuilder::new();
-        frame.to_ev44_messages(&mut fbb, 2, |e| captured_messages.push(e.to_vec()));
-
-        assert_eq!(captured_messages.len(), 2);
-
-        let event1 = root_as_event_44_message(&captured_messages[0]).unwrap();
-        assert_eq!(
-            event1.pixel_id().unwrap().iter().collect::<Vec<_>>(),
-            vec![0, 2]
-        );
-        assert_eq!(
-            event1.time_of_flight().unwrap().iter().collect::<Vec<_>>(),
-            vec![1, 3]
-        );
-        assert_eq!(event1.reference_time().iter().next(), Some(123456));
-
-        let event2 = root_as_event_44_message(&captured_messages[1]).unwrap();
-        assert_eq!(
-            event2.pixel_id().unwrap().iter().collect::<Vec<_>>(),
-            vec![5]
-        );
-        assert_eq!(
-            event2.time_of_flight().unwrap().iter().collect::<Vec<_>>(),
-            vec![6]
-        );
-        assert_eq!(event2.reference_time().iter().next(), Some(123456));
-    }
-}
+pub mod deserialization;
+pub mod frame;
+pub mod kafka;
+pub mod queue;
