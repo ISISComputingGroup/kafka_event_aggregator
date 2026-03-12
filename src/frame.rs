@@ -4,10 +4,9 @@ use crate::ev44_events_generated::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
 };
 use crate::pu00_pulse_metadata_generated::{
-    Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer,
+    Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer
 };
 use flatbuffers::FlatBufferBuilder;
-use log::warn;
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
 
@@ -74,16 +73,37 @@ impl Frame {
         self.reference_time
     }
 
+    /// Period into which this frame was collected
+    pub fn period(&self) -> Option<u32> {
+        self.period
+    }
+
+    /// Veto flags for this frame
+    pub fn vetos(&self) -> u32 {
+        self.vetos
+    }
+
+    /// Proton charge for this frame (in uAh)
+    pub fn proton_charge(&self) -> Option<f32> {
+        self.protons_per_pulse
+    }
+
     /// Whether this frame's time-to-live has expired.
     pub fn is_ttl_expired(&self) -> bool {
-        Instant::now() > self.ttl_deadline
+        Instant::now() >= self.ttl_deadline
     }
 
     /// Assign new metadata to a frame.
-    pub fn set_metadata(&mut self, vetos: u32, protons_per_pulse: f32, period: u32) {
-        self.vetos |= vetos;
-        self.protons_per_pulse = Some(protons_per_pulse);
-        self.period = Some(period);
+    pub fn set_metadata(&mut self, vetos: Option<u32>, protons_per_pulse: Option<f32>, period: Option<u32>) {
+        if let Some(vetos) = vetos {
+            self.vetos |= vetos;
+        }
+        if let Some(protons_per_pulse) = protons_per_pulse {
+            self.protons_per_pulse = Some(protons_per_pulse);
+        }
+        if let Some(period) = period {
+            self.period = Some(period);
+        }
     }
 
     /// Append new events to this frame from an iterator.
@@ -101,17 +121,15 @@ impl Frame {
         &self,
         fbb: &'_ mut FlatBufferBuilder<'_>,
         mut sink: F,
-        protons_per_pulse: f32,
-        period: u32,
     ) where
         F: FnMut(i64, &[u8]),
     {
         let args = Pu00MessageArgs {
             source_name: Some(fbb.create_string(SOURCE_NAME)),
             message_id: 0, // TODO
-            proton_charge: protons_per_pulse,
-            vetos: self.vetos,
-            period_number: period,
+            proton_charge: self.protons_per_pulse,
+            vetos: Some(self.vetos),
+            period_number: self.period,
             reference_time: self.reference_time,
         };
 
@@ -157,20 +175,11 @@ impl Frame {
     ) where
         F: FnMut(i64, &[u8]),
     {
-        if let Some(protons_per_pulse) = self.protons_per_pulse
-            && let Some(period) = self.period
-        {
-            self.emit_pu00_message(fbb, &mut sink, protons_per_pulse, period);
+        self.emit_pu00_message(fbb, &mut sink);
 
-            self.events
-                .chunks(max_events_per_message)
-                .for_each(|chunk| self.emit_ev44_message(fbb, chunk, &mut sink))
-        } else {
-            warn!(
-                "Frame at reference time {} expired without protons_per_pulse or period set.",
-                self.reference_time
-            );
-        }
+        self.events
+            .chunks(max_events_per_message)
+            .for_each(|chunk| self.emit_ev44_message(fbb, chunk, &mut sink))
     }
 }
 
@@ -178,9 +187,10 @@ impl Frame {
 mod tests {
     use super::*;
     use crate::ev44_events_generated::root_as_event_44_message;
+    use crate::pu00_pulse_metadata_generated::root_as_pu_00_message;
 
     #[test]
-    fn test_to_ev44_messages() {
+    fn test_emit_messages() {
         let mut captured_messages = vec![];
 
         let frame = Frame {
@@ -198,9 +208,9 @@ mod tests {
                     time_of_flight: 6,
                 },
             ],
-            vetos: 0,
-            period: Some(0),
-            protons_per_pulse: Some(0.0),
+            vetos: 0b11010011,
+            period: Some(5),
+            protons_per_pulse: Some(123.456),
             reference_time: 123456,
             ttl_deadline: Instant::now(),
         };
@@ -209,6 +219,19 @@ mod tests {
         frame.emit_messages(&mut fbb, 2, |_, e| captured_messages.push(e.to_vec()));
 
         assert_eq!(captured_messages.len(), 3);
+
+        let pu00 = root_as_pu_00_message(&captured_messages[0]).unwrap();
+        assert_eq!(
+            pu00.vetos(),
+            Some(0b11010011)
+        );
+        assert!(
+            (pu00.proton_charge().unwrap() - 123.456).abs() < 0.001
+        );
+        assert_eq!(
+            pu00.period_number(),
+            Some(5)
+        );
 
         // First ev44 containing two events
         let event1 = root_as_event_44_message(&captured_messages[1]).unwrap();
@@ -233,5 +256,20 @@ mod tests {
             vec![6]
         );
         assert_eq!(event2.reference_time().iter().next(), Some(123456));
+    }
+
+    #[test]
+    fn test_to_kafka_timestamp() {
+        let frame = Frame::new_with_reference_time(123_456_789_000_000, 0);
+        assert_eq!(frame.kafka_timestamp(), 123_456_789);
+    }
+
+    #[test]
+    fn test_is_ttl_expired() {
+        let frame1 = Frame::new_with_reference_time(123_456_789_000_000, 0);
+        assert!(frame1.is_ttl_expired());
+
+        let frame2 = Frame::new_with_reference_time(123_456_789_000_000, 50_000);
+        assert!(!frame2.is_ttl_expired());
     }
 }

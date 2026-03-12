@@ -136,8 +136,42 @@ impl FrameQueue {
             Ok(ReceivedMessage::Ev44(data)) => self.process_raw_ev44_message(&data),
             Ok(ReceivedMessage::Pu00(data)) => self.process_raw_pu00_metadata_message(&data),
             Err(e) => {
-                error!("Cannot deserialise message: {e}");
+                error!("Cannot deserialize message: {e}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_apply_metadata_to_frame() {
+        let mut frame_queue = FrameQueue::new(0, 10);
+
+        frame_queue.apply_to_frame(1, |frame| {
+            frame.set_metadata(Some(0b11010011), None, Some(3))
+        });
+        assert_eq!(frame_queue.len(), 1);
+
+        // Reference time within 10ns of above frame; should add to that same frame
+        // ORing together vetos and overwriting period if provided
+        frame_queue.apply_to_frame(5, |frame| {
+            frame.set_metadata(Some(0b11110000), None, Some(5))
+        });
+        assert_eq!(frame_queue.len(), 1);
+
+        // Reference time outside 10ns of first frame; should add a new frame
+        frame_queue.apply_to_frame(15, |frame| {
+            frame.set_metadata(Some(0), None, Some(6))
+        });
+        assert_eq!(frame_queue.len(), 2);
+
+        assert_eq!(frame_queue.frames[0].period(), Some(5));
+        assert_eq!(frame_queue.frames[0].vetos(), 0b11110011);
+
+        assert_eq!(frame_queue.frames[1].period(), Some(6));
+        assert_eq!(frame_queue.frames[1].vetos(), 0);
     }
 }
