@@ -8,12 +8,17 @@ flatc-rust = "0.2.0"
 
 [dependencies]
 flatbuffers = "25.12.19"
-rdkafka = { version="0.39.0", features = ["cmake_build", "curl"] }
 tokio = { version = "1.50.0", features = ["macros", "rt-multi-thread", "signal"] }
 futures = "0.3.32"
 log = "0.4.29"
 env_logger = "0.11.9"
 rayon = "1.11.0"
+
+[target.'cfg(windows)'.dependencies]
+rdkafka = { version="0.39.0", features = ["cmake_build"] }
+
+[target.'cfg(unix)'.dependencies]
+rdkafka = { version="0.39.0", features = ["cmake_build", "curl", "ssl-vendored"] }
 
 [dev-dependencies]
 criterion = { version = "0.8.2",  features = ["html_reports"]}
