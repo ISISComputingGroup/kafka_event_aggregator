@@ -4,7 +4,7 @@ use crate::ev44_events_generated::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
 };
 use crate::pu00_pulse_metadata_generated::{
-    Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer
+    Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer,
 };
 use flatbuffers::FlatBufferBuilder;
 use rayon::prelude::*;
@@ -94,7 +94,12 @@ impl Frame {
     }
 
     /// Assign new metadata to a frame.
-    pub fn set_metadata(&mut self, vetos: Option<u32>, protons_per_pulse: Option<f32>, period: Option<u32>) {
+    pub fn set_metadata(
+        &mut self,
+        vetos: Option<u32>,
+        protons_per_pulse: Option<f32>,
+        period: Option<u32>,
+    ) {
         if let Some(vetos) = vetos {
             self.vetos |= vetos;
         }
@@ -117,11 +122,8 @@ impl Frame {
     }
 
     /// Emit a pu00 (frame metadata) message for this frame to the provided sink.
-    fn emit_pu00_message<F>(
-        &self,
-        fbb: &'_ mut FlatBufferBuilder<'_>,
-        mut sink: F,
-    ) where
+    fn emit_pu00_message<F>(&self, fbb: &'_ mut FlatBufferBuilder<'_>, mut sink: F)
+    where
         F: FnMut(i64, &[u8]),
     {
         let args = Pu00MessageArgs {
@@ -221,17 +223,9 @@ mod tests {
         assert_eq!(captured_messages.len(), 3);
 
         let pu00 = root_as_pu_00_message(&captured_messages[0]).unwrap();
-        assert_eq!(
-            pu00.vetos(),
-            Some(0b11010011)
-        );
-        assert!(
-            (pu00.proton_charge().unwrap() - 123.456).abs() < 0.001
-        );
-        assert_eq!(
-            pu00.period_number(),
-            Some(5)
-        );
+        assert_eq!(pu00.vetos(), Some(0b11010011));
+        assert!((pu00.proton_charge().unwrap() - 123.456).abs() < 0.001);
+        assert_eq!(pu00.period_number(), Some(5));
 
         // First ev44 containing two events
         let event1 = root_as_event_44_message(&captured_messages[1]).unwrap();

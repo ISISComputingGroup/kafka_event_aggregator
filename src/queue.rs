@@ -163,9 +163,7 @@ mod tests {
         assert_eq!(frame_queue.len(), 1);
 
         // Reference time outside 10ns of first frame; should add a new frame
-        frame_queue.apply_to_frame(15, |frame| {
-            frame.set_metadata(Some(0), None, Some(6))
-        });
+        frame_queue.apply_to_frame(15, |frame| frame.set_metadata(Some(0), None, Some(6)));
         assert_eq!(frame_queue.len(), 2);
 
         assert_eq!(frame_queue.frames[0].period(), Some(5));

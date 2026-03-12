@@ -33,11 +33,11 @@ pub fn deserialize(value: &[u8]) -> Result<ReceivedMessage<'_>, String> {
 
 #[cfg(test)]
 mod tests {
-    use flatbuffers::FlatBufferBuilder;
-    use crate::deserialization::ReceivedMessage::{Ev44, Pu00};
-    use crate::ev44_events_generated::{finish_event_44_message_buffer, Event44MessageArgs};
-    use crate::pu00_pulse_metadata_generated::{finish_pu_00_message_buffer, Pu00MessageArgs};
     use super::*;
+    use crate::deserialization::ReceivedMessage::{Ev44, Pu00};
+    use crate::ev44_events_generated::{Event44MessageArgs, finish_event_44_message_buffer};
+    use crate::pu00_pulse_metadata_generated::{Pu00MessageArgs, finish_pu_00_message_buffer};
+    use flatbuffers::FlatBufferBuilder;
 
     #[test]
     fn test_deserialize_pu00() {
@@ -53,7 +53,7 @@ mod tests {
         let deserialized = deserialize(fbb.finished_data()).expect("should deserialize");
 
         match deserialized {
-            Pu00(_) => {},
+            Pu00(_) => {}
             _ => panic!("Deserializing pu00 did not give a pu00 message"),
         }
     }
@@ -74,7 +74,7 @@ mod tests {
         let deserialized = deserialize(fbb.finished_data()).expect("should deserialize");
 
         match deserialized {
-            Ev44(_) => {},
+            Ev44(_) => {}
             _ => panic!("Deserializing ev44 did not give a ev44 message"),
         }
     }
