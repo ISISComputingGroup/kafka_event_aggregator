@@ -16,6 +16,7 @@ rayon = "1.11.0"
 serde = "1.0.228"
 toml = "1.0.6"
 clap = { version = "4.5.61", features = ["derive"] }
+clap-verbosity-flag = "3.0.4"
 anyhow = "1.0.102"
 
 [target.'cfg(windows)'.dependencies]

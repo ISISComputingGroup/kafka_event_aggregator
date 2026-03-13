@@ -7,7 +7,7 @@ use crate::ev44_events_generated::Event44Message;
 use crate::frame::{Event, Frame};
 use crate::pu00_pulse_metadata_generated::Pu00Message;
 use flatbuffers::FlatBufferBuilder;
-use log::{error, warn};
+use log::{debug, warn};
 use std::collections::VecDeque;
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
@@ -56,7 +56,15 @@ impl<'a> FrameQueue<'a> {
                 .pop_front()
                 .expect("unreachable; frames is empty after checking first frame exists");
 
+            debug!(
+                "Sending expired frame (reference_time={})",
+                completed_frame.reference_time()
+            );
             completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
+            debug!(
+                "Sent expired frame (reference_time={})",
+                completed_frame.reference_time()
+            );
         }
     }
 
@@ -129,7 +137,7 @@ impl<'a> FrameQueue<'a> {
             Ok(ReceivedMessage::Ev44(data)) => self.process_raw_ev44_message(&data),
             Ok(ReceivedMessage::Pu00(data)) => self.process_raw_pu00_metadata_message(&data),
             Err(e) => {
-                error!("Cannot deserialize message: {e}");
+                warn!("Cannot deserialize message: {e}");
             }
         }
     }

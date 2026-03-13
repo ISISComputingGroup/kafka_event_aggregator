@@ -1,5 +1,6 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use flatbuffers::FlatBufferBuilder;
+use kafka_event_aggregator::config::AggregatorConfig;
 use kafka_event_aggregator::ev44_events_generated::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
 };
@@ -8,7 +9,6 @@ use kafka_event_aggregator::queue::FrameQueue;
 use rand::prelude::*;
 use rand::rngs::ChaCha8Rng;
 use std::hint::black_box;
-use kafka_event_aggregator::config::AggregatorConfig;
 
 fn make_config() -> AggregatorConfig {
     AggregatorConfig {
@@ -59,14 +59,9 @@ fn benchmark_emit_events(c: &mut Criterion) {
                         frame
                     },
                     |frame| {
-                        frame.emit_messages(
-                            &mut fbb,
-                            &mut 0,
-                            &config,
-                            |timestamp, msg| {
-                                black_box((timestamp, msg));
-                            },
-                        );
+                        frame.emit_messages(&mut fbb, &mut 0, &config, |timestamp, msg| {
+                            black_box((timestamp, msg));
+                        });
                     },
                     BatchSize::LargeInput,
                 );
@@ -77,7 +72,7 @@ fn benchmark_emit_events(c: &mut Criterion) {
 
 fn benchmark_process_raw_messages(c: &mut Criterion) {
     let config = make_config();
-    
+
     const NUM_FRAMES: i64 = 100;
     const MESSAGES_PER_FRAME: usize = 100;
     const EVENTS_PER_MESSAGE: usize = 500;

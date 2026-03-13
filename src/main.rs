@@ -1,16 +1,16 @@
+use anyhow::bail;
+use clap::Parser;
 use flatbuffers::FlatBufferBuilder;
 use futures::stream::StreamExt;
 use kafka_event_aggregator::config::config_from_str;
 use kafka_event_aggregator::kafka::{make_consumer, make_producer};
 use kafka_event_aggregator::queue::FrameQueue;
-use log::{error, info};
+use log::{info, warn};
 use rdkafka::Message;
 use rdkafka::producer::BaseRecord;
 use std::time::Duration;
 use tokio::select;
 use tokio::signal::ctrl_c;
-use clap::Parser;
-
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -18,13 +18,19 @@ struct Args {
     /// Path to config file
     #[arg(short, long)]
     config: String,
+
+    #[command(flatten)]
+    verbosity: clap_verbosity_flag::Verbosity,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::init();
-
     let args = Args::try_parse()?;
+
+    env_logger::Builder::new()
+        .filter_level(args.verbosity.into())
+        .format_timestamp_micros()
+        .init();
 
     let config = config_from_str(&std::fs::read_to_string(args.config)?)?;
 
@@ -48,11 +54,10 @@ async fn main() -> anyhow::Result<()> {
                     if let Some(payload) = msg.payload() {
                         frame_queue.process_raw_message(payload);
                     } else {
-                        error!("Received event without payload; ignoring.");
+                        warn!("Received event without payload; ignoring.");
                     }
                 } else {
-                    error!("Error reading from stream {:?}", msg);
-                    break;
+                    bail!("Error reading from stream {:?}", msg);
                 }
             },
             _ = frame_queue_poll_interval.tick() => {
@@ -64,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
                     );
 
                     if let Err((e, _)) = result {
-                        error!("Error sending message to kafka: {:?}", e);
+                        warn!("Error sending message to kafka: {:?}", e);
                     }
                 });
             },
