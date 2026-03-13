@@ -1,6 +1,7 @@
 //! Frame queue of pending frames, which will be accumulated into and sent to
 //! Kafka once their time-to-live expires.
 
+use crate::config::AggregatorConfig;
 use crate::deserialization::{ReceivedMessage, deserialize};
 use crate::ev44_events_generated::Event44Message;
 use crate::frame::{Event, Frame};
@@ -8,33 +9,24 @@ use crate::pu00_pulse_metadata_generated::Pu00Message;
 use flatbuffers::FlatBufferBuilder;
 use log::{error, warn};
 use std::collections::VecDeque;
-use std::time::Instant;
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
 /// in the rawEvents Kafka consumer (which is also ordered by time-to-live).
-#[derive(Debug, Default)]
-pub struct FrameQueue {
+#[derive(Debug)]
+pub struct FrameQueue<'a> {
     /// New frames pushed to back of queue, old frames popped from front of queue
     frames: VecDeque<Frame>,
     /// How long, in ms, to keep frames in the queue before emitting them
-    expiry_offset_ms: u64,
-    /// If two frames have the same reference time to within this many nanoseconds,
-    /// then they are considered to be the same frame
-    reference_time_tolerance_ns: u64,
+    config: &'a AggregatorConfig,
     /// Message ID
     message_id: i64,
 }
 
-impl FrameQueue {
-    pub fn new(
-        expiry_offset_ms: u64,
-        reference_time_tolerance_ns: u64,
-        next_message_id: i64,
-    ) -> Self {
+impl<'a> FrameQueue<'a> {
+    pub fn new(config: &'a AggregatorConfig, next_message_id: i64) -> Self {
         FrameQueue {
             frames: VecDeque::new(),
-            expiry_offset_ms,
-            reference_time_tolerance_ns,
+            config,
             message_id: next_message_id,
         }
     }
@@ -49,12 +41,8 @@ impl FrameQueue {
         self.frames.is_empty()
     }
 
-    pub fn send_expired_frames<F>(
-        &mut self,
-        fbb: &mut FlatBufferBuilder<'_>,
-        max_events_per_message: usize,
-        mut sink: F,
-    ) where
+    pub fn send_expired_frames<F>(&mut self, fbb: &mut FlatBufferBuilder<'_>, mut sink: F)
+    where
         F: FnMut(i64, &[u8]),
     {
         while self
@@ -68,19 +56,7 @@ impl FrameQueue {
                 .pop_front()
                 .expect("unreachable; frames is empty after checking first frame exists");
 
-            let start = Instant::now();
-            completed_frame.emit_messages(
-                fbb,
-                &mut self.message_id,
-                max_events_per_message,
-                &mut sink,
-            );
-            let t = start.elapsed().as_micros();
-            println!(
-                "Emitting frame with {} events took {} us",
-                completed_frame.num_events(),
-                t
-            );
+            completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
         }
     }
 
@@ -102,14 +78,13 @@ impl FrameQueue {
             .iter_mut()
             .rev() // Start search from the most recent frame; this is where it is most likely to be.
             .find(|frame| {
-                frame.reference_time().abs_diff(reference_time) <= self.reference_time_tolerance_ns
+                frame.reference_time().abs_diff(reference_time)
+                    <= self.config.reference_time_tolerance_ns
             }) {
             Some(frame) => frame,
             None => {
-                self.frames.push_back(Frame::new_with_reference_time(
-                    reference_time,
-                    self.expiry_offset_ms,
-                ));
+                self.frames
+                    .push_back(Frame::new(reference_time, self.config));
                 self.frames
                     .back_mut()
                     .expect("unreachable; frames is empty after pushing new frame")
@@ -166,7 +141,12 @@ mod tests {
 
     #[test]
     fn test_apply_metadata_to_frame() {
-        let mut frame_queue = FrameQueue::new(0, 10, 0);
+        let config = AggregatorConfig {
+            max_events_per_message: 2,
+            reference_time_tolerance_ns: 10,
+            ..Default::default()
+        };
+        let mut frame_queue = FrameQueue::new(&config, 10);
 
         frame_queue.apply_to_frame(1, |frame| {
             frame.set_metadata(Some(0b11010011), None, Some(3))

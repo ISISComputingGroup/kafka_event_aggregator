@@ -1,42 +1,37 @@
 //! Kafka utilities.
 
+use crate::config::AggregatorConfig;
 use rdkafka::ClientConfig;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::producer::{DefaultProducerContext, ThreadedProducer};
+use anyhow::Result;
 
-pub fn make_consumer(
-    bootstrap_servers: &str,
-    input_topic_name: &str,
-    auto_commit_interval_ms: u64,
-) -> StreamConsumer<DefaultConsumerContext> {
-    let consumer: StreamConsumer = ClientConfig::new()
-        .set("bootstrap.servers", bootstrap_servers)
-        .set(
-            "group.id",
-            format!("kafka-event-aggregator-{input_topic_name}"),
-        )
-        .set("enable.auto.commit", "true")
-        .set(
-            "auto.commit.interval.ms",
-            format!("{}", auto_commit_interval_ms),
-        )
-        .create()
-        .unwrap_or_else(|e| panic!("Kafka consumer creation failed due to {}", e));
+pub fn make_consumer(config: &AggregatorConfig) -> Result<StreamConsumer<DefaultConsumerContext>> {
+    let mut client_config = ClientConfig::new();
 
-    consumer.subscribe(&[input_topic_name]).unwrap_or_else(|e| {
-        panic!(
-            "Kafka consumer can't subscribe to specified topic ({}) due to: {}",
-            input_topic_name, e
-        )
-    });
+    for (k, v) in &config.kafka_consumer {
+        client_config.set(k, v);
+    }
+
+    let consumer: StreamConsumer<DefaultConsumerContext> = client_config
+        .create()?;
 
     consumer
+        .subscribe(&[&config.input_topic])
+        .unwrap_or_else(|e| {
+            panic!(
+                "Kafka consumer can't subscribe to specified topic ({}) due to: {}",
+                config.input_topic, e
+            )
+        });
+
+    Ok(consumer)
 }
 
-pub fn make_producer(bootstrap_servers: &str) -> ThreadedProducer<DefaultProducerContext> {
-    ClientConfig::new()
-        .set("bootstrap.servers", bootstrap_servers)
-        .set("enable.idempotence", "true")
-        .create()
-        .unwrap_or_else(|e| panic!("Kafka producer creation failed due to: {}", e))
+pub fn make_producer(config: &AggregatorConfig) -> Result<ThreadedProducer<DefaultProducerContext>> {
+    let mut client_config = ClientConfig::new();
+    for (k, v) in &config.kafka_producer {
+        client_config.set(k, v);
+    }
+    Ok(client_config.create()?)
 }

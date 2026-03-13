@@ -1,5 +1,6 @@
 //! Internal representation of a frame of data.
 
+use crate::config::AggregatorConfig;
 use crate::ev44_events_generated::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
 };
@@ -52,13 +53,13 @@ pub struct Frame {
 impl Frame {
     /// Create a new frame with the specified reference time and a TTL deadline
     /// `expiry_offset_ms` from now.
-    pub fn new_with_reference_time(reference_time: i64, expiry_offset_ms: u64) -> Self {
+    pub fn new(reference_time: i64, config: &AggregatorConfig) -> Self {
         Frame {
             reference_time,
-            ttl_deadline: Instant::now() + Duration::from_millis(expiry_offset_ms),
+            ttl_deadline: Instant::now() + Duration::from_millis(config.expiry_offset_ms),
             period: None,
             vetos: 0,
-            events: Vec::with_capacity(100_000), // Limit reallocations; reserve space for 100k events per frame up-front
+            events: Vec::with_capacity(config.max_events_per_message),
             protons_per_pulse: None,
         }
     }
@@ -181,24 +182,26 @@ impl Frame {
         &mut self,
         fbb: &mut FlatBufferBuilder<'_>,
         message_id: &mut i64,
-        max_events_per_message: usize,
+        config: &AggregatorConfig,
         mut sink: F,
     ) where
         F: FnMut(i64, &[u8]),
     {
-        // if self.protons_per_pulse.is_none() || self.period.is_none() {
-        //     warn!("Failed to emit partial frame; required metadata for this frame was not present. \
-        //     This can occur if an event message and it's corresponding metadata are not \
-        //     received within expiry_offset_ms of each other.");
-        //     return;
-        // }
+        if self.protons_per_pulse.is_none() || self.period.is_none() {
+            warn!(
+                "Failed to emit partial frame; required metadata for this frame was not present. \
+            This can occur if an event message and it's corresponding metadata are not \
+            received within expiry_offset_ms of each other."
+            );
+            return;
+        }
         self.sort_by_tof();
 
         self.emit_pu00_message(fbb, *message_id, &mut sink);
         *message_id += 1;
 
         self.events
-            .chunks(max_events_per_message)
+            .chunks(config.max_events_per_message)
             .for_each(|chunk| {
                 self.emit_ev44_message(fbb, *message_id, chunk, &mut sink);
                 *message_id += 1;
@@ -239,9 +242,15 @@ mod tests {
         };
 
         let mut fbb = FlatBufferBuilder::new();
-        frame.emit_messages(&mut fbb, &mut 0, 2, |_, e| {
-            captured_messages.push(e.to_vec())
-        });
+        frame.emit_messages(
+            &mut fbb,
+            &mut 0,
+            &AggregatorConfig {
+                max_events_per_message: 2,
+                ..Default::default()
+            },
+            |_, e| captured_messages.push(e.to_vec()),
+        );
 
         assert_eq!(captured_messages.len(), 3);
 
@@ -277,16 +286,35 @@ mod tests {
 
     #[test]
     fn test_to_kafka_timestamp() {
-        let frame = Frame::new_with_reference_time(123_456_789_000_000, 0);
+        let frame = Frame::new(
+            123_456_789_000_000,
+            &AggregatorConfig {
+                ..Default::default()
+            },
+        );
         assert_eq!(frame.kafka_timestamp(), 123_456_789);
     }
 
     #[test]
     fn test_is_ttl_expired() {
-        let frame1 = Frame::new_with_reference_time(123_456_789_000_000, 0);
+        let frame1 = Frame::new(
+            123_456_789_000_000,
+            &AggregatorConfig {
+                max_events_per_message: 10_000,
+                expiry_offset_ms: 0,
+                ..Default::default()
+            },
+        );
         assert!(frame1.is_ttl_expired());
 
-        let frame2 = Frame::new_with_reference_time(123_456_789_000_000, 50_000);
+        let frame2 = Frame::new(
+            123_456_789_000_000,
+            &AggregatorConfig {
+                max_events_per_message: 10_000,
+                expiry_offset_ms: 10_000,
+                ..Default::default()
+            },
+        );
         assert!(!frame2.is_ttl_expired());
     }
 }

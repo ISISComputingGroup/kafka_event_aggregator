@@ -50,10 +50,10 @@ mod tests {
         let pu00 = Pu00Message::create(&mut fbb, &pu00_args);
         finish_pu_00_message_buffer(&mut fbb, pu00);
 
-        let deserialized = deserialize(fbb.finished_data()).expect("should deserialize");
+        let deserialized = deserialize(fbb.finished_data());
 
         match deserialized {
-            Pu00(_) => {}
+            Ok(Pu00(_)) => {}
             _ => panic!("Deserializing pu00 did not give a pu00 message"),
         }
     }
@@ -71,10 +71,10 @@ mod tests {
         let ev44 = Event44Message::create(&mut fbb, &ev44_args);
         finish_event_44_message_buffer(&mut fbb, ev44);
 
-        let deserialized = deserialize(fbb.finished_data()).expect("should deserialize");
+        let deserialized = deserialize(fbb.finished_data());
 
         match deserialized {
-            Ev44(_) => {}
+            Ok(Ev44(_)) => {}
             _ => panic!("Deserializing ev44 did not give a ev44 message"),
         }
     }

@@ -8,6 +8,14 @@ use kafka_event_aggregator::queue::FrameQueue;
 use rand::prelude::*;
 use rand::rngs::ChaCha8Rng;
 use std::hint::black_box;
+use kafka_event_aggregator::config::AggregatorConfig;
+
+fn make_config() -> AggregatorConfig {
+    AggregatorConfig {
+        max_events_per_message: 100_000,
+        ..Default::default()
+    }
+}
 
 fn make_fake_events(num: usize) -> Vec<Event> {
     let mut rng = ChaCha8Rng::seed_from_u64(0);
@@ -23,6 +31,8 @@ fn make_fake_events(num: usize) -> Vec<Event> {
 const BYTES_PER_EVENT: usize = 8;
 
 fn benchmark_emit_events(c: &mut Criterion) {
+    let config = make_config();
+
     let mut group = c.benchmark_group("emit_events");
     for events_per_frame in [
         1000,       // Approx 3 mbps at 50Hz
@@ -43,14 +53,20 @@ fn benchmark_emit_events(c: &mut Criterion) {
 
                 b.iter_batched_ref(
                     || {
-                        let mut frame = Frame::new_with_reference_time(0, 0);
+                        let mut frame = Frame::new(0, &config);
+                        frame.set_metadata(Some(0), Some(0.), Some(0));
                         frame.append_events(make_fake_events(*events_per_frame).into_iter());
                         frame
                     },
                     |frame| {
-                        frame.emit_messages(&mut fbb, &mut 0, 100_000, |timestamp, msg| {
-                            black_box((timestamp, msg));
-                        });
+                        frame.emit_messages(
+                            &mut fbb,
+                            &mut 0,
+                            &config,
+                            |timestamp, msg| {
+                                black_box((timestamp, msg));
+                            },
+                        );
                     },
                     BatchSize::LargeInput,
                 );
@@ -60,6 +76,8 @@ fn benchmark_emit_events(c: &mut Criterion) {
 }
 
 fn benchmark_process_raw_messages(c: &mut Criterion) {
+    let config = make_config();
+    
     const NUM_FRAMES: i64 = 100;
     const MESSAGES_PER_FRAME: usize = 100;
     const EVENTS_PER_MESSAGE: usize = 500;
@@ -90,7 +108,7 @@ fn benchmark_process_raw_messages(c: &mut Criterion) {
 
     group.bench_function("process_raw_message", |b| {
         b.iter(|| {
-            let mut queue = FrameQueue::new(0, 0, 0);
+            let mut queue = FrameQueue::new(&config, 0);
 
             messages
                 .iter()

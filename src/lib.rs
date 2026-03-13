@@ -60,6 +60,7 @@ pub mod ev44_events_generated;
 #[path = "flatbuffers_generated/pu00_pulse_metadata_generated.rs"]
 pub mod pu00_pulse_metadata_generated;
 
+pub mod config;
 pub mod deserialization;
 pub mod frame;
 pub mod kafka;
