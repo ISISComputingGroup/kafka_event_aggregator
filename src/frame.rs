@@ -7,6 +7,7 @@ use crate::pu00_pulse_metadata_generated::{
     Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer,
 };
 use flatbuffers::FlatBufferBuilder;
+use log::warn;
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
 
@@ -88,6 +89,11 @@ impl Frame {
         self.protons_per_pulse
     }
 
+    /// Number of events currently accumulated into this frame
+    pub fn num_events(&self) -> usize {
+        self.events.len()
+    }
+
     /// Whether this frame's time-to-live has expired.
     pub fn is_ttl_expired(&self) -> bool {
         Instant::now() >= self.ttl_deadline
@@ -112,23 +118,24 @@ impl Frame {
     }
 
     /// Append new events to this frame from an iterator.
-    pub fn append_events(&mut self, events: impl Iterator<Item = Event>) {
+    pub fn append_events(&mut self, events: impl ExactSizeIterator<Item = Event>) {
+        self.events.reserve(events.len());
         self.events.extend(events)
     }
 
     /// Sort the events in this frame by time-of-flight
-    pub fn sort_by_tof(&mut self) {
+    fn sort_by_tof(&mut self) {
         self.events.par_sort_unstable_by_key(|e| e.time_of_flight);
     }
 
     /// Emit a pu00 (frame metadata) message for this frame to the provided sink.
-    fn emit_pu00_message<F>(&self, fbb: &'_ mut FlatBufferBuilder<'_>, mut sink: F)
+    fn emit_pu00_message<F>(&self, fbb: &'_ mut FlatBufferBuilder<'_>, message_id: i64, mut sink: F)
     where
         F: FnMut(i64, &[u8]),
     {
         let args = Pu00MessageArgs {
             source_name: Some(fbb.create_string(SOURCE_NAME)),
-            message_id: 0, // TODO
+            message_id,
             proton_charge: self.protons_per_pulse,
             vetos: Some(self.vetos),
             period_number: self.period,
@@ -145,17 +152,18 @@ impl Frame {
     fn emit_ev44_message<F>(
         &self,
         fbb: &'_ mut FlatBufferBuilder<'_>,
+        message_id: i64,
         events: &[Event],
         mut sink: F,
     ) where
         F: FnMut(i64, &[u8]),
     {
-        let tofs = fbb.create_vector_from_iter(events.iter().map(|e| e.time_of_flight));
-        let pixel_ids = fbb.create_vector_from_iter(events.iter().map(|e| e.pixel_id));
+        let tofs = fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
+        let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
 
         let args = Event44MessageArgs {
             source_name: Some(fbb.create_string(SOURCE_NAME)),
-            message_id: 0, // TODO
+            message_id,
             reference_time: Some(fbb.create_vector(&[self.reference_time])),
             reference_time_index: Some(fbb.create_vector(&[0])),
             time_of_flight: Some(tofs),
@@ -170,18 +178,31 @@ impl Frame {
 
     /// Emit pu00 and ev44 messages representing this frame to the specified sink.
     pub fn emit_messages<F>(
-        &self,
+        &mut self,
         fbb: &mut FlatBufferBuilder<'_>,
+        message_id: &mut i64,
         max_events_per_message: usize,
         mut sink: F,
     ) where
         F: FnMut(i64, &[u8]),
     {
-        self.emit_pu00_message(fbb, &mut sink);
+        // if self.protons_per_pulse.is_none() || self.period.is_none() {
+        //     warn!("Failed to emit partial frame; required metadata for this frame was not present. \
+        //     This can occur if an event message and it's corresponding metadata are not \
+        //     received within expiry_offset_ms of each other.");
+        //     return;
+        // }
+        self.sort_by_tof();
+
+        self.emit_pu00_message(fbb, *message_id, &mut sink);
+        *message_id += 1;
 
         self.events
             .chunks(max_events_per_message)
-            .for_each(|chunk| self.emit_ev44_message(fbb, chunk, &mut sink))
+            .for_each(|chunk| {
+                self.emit_ev44_message(fbb, *message_id, chunk, &mut sink);
+                *message_id += 1;
+            })
     }
 }
 
@@ -195,7 +216,7 @@ mod tests {
     fn test_emit_messages() {
         let mut captured_messages = vec![];
 
-        let frame = Frame {
+        let mut frame = Frame {
             events: vec![
                 Event {
                     pixel_id: 0,
@@ -218,7 +239,9 @@ mod tests {
         };
 
         let mut fbb = FlatBufferBuilder::new();
-        frame.emit_messages(&mut fbb, 2, |_, e| captured_messages.push(e.to_vec()));
+        frame.emit_messages(&mut fbb, &mut 0, 2, |_, e| {
+            captured_messages.push(e.to_vec())
+        });
 
         assert_eq!(captured_messages.len(), 3);
 

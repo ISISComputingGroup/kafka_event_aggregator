@@ -17,8 +17,9 @@ async fn main() {
 
     let input_topic_name = "NDW2922_rawEvents";
     let output_topic_name = "NDW2922_events";
+    let auto_commit_interval_ms = 5000;
 
-    let consumer = make_consumer(bootstrap_servers, input_topic_name);
+    let consumer = make_consumer(bootstrap_servers, input_topic_name, auto_commit_interval_ms);
     let mut stream = consumer.stream();
 
     let producer = make_producer(bootstrap_servers);
@@ -29,9 +30,15 @@ async fn main() {
 
     let mut fbb = FlatBufferBuilder::new();
 
-    let expiry_offset_ms = 500;
+    let expiry_offset_ms = 1000;
     let reference_time_tolerance_ns = 500;
-    let mut frame_queue = FrameQueue::new(expiry_offset_ms, reference_time_tolerance_ns);
+    let next_message_id = 0;
+
+    let mut frame_queue = FrameQueue::new(
+        expiry_offset_ms,
+        reference_time_tolerance_ns,
+        next_message_id,
+    );
 
     let max_events_per_message = 100_000;
 

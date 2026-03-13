@@ -8,6 +8,7 @@ use crate::pu00_pulse_metadata_generated::Pu00Message;
 use flatbuffers::FlatBufferBuilder;
 use log::{error, warn};
 use std::collections::VecDeque;
+use std::time::Instant;
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
 /// in the rawEvents Kafka consumer (which is also ordered by time-to-live).
@@ -20,14 +21,21 @@ pub struct FrameQueue {
     /// If two frames have the same reference time to within this many nanoseconds,
     /// then they are considered to be the same frame
     reference_time_tolerance_ns: u64,
+    /// Message ID
+    message_id: i64,
 }
 
 impl FrameQueue {
-    pub fn new(expiry_offset_ms: u64, reference_time_tolerance_ns: u64) -> Self {
+    pub fn new(
+        expiry_offset_ms: u64,
+        reference_time_tolerance_ns: u64,
+        next_message_id: i64,
+    ) -> Self {
         FrameQueue {
             frames: VecDeque::new(),
             expiry_offset_ms,
             reference_time_tolerance_ns,
+            message_id: next_message_id,
         }
     }
 
@@ -60,9 +68,19 @@ impl FrameQueue {
                 .pop_front()
                 .expect("unreachable; frames is empty after checking first frame exists");
 
-            completed_frame.sort_by_tof();
-
-            completed_frame.emit_messages(fbb, max_events_per_message, &mut sink)
+            let start = Instant::now();
+            completed_frame.emit_messages(
+                fbb,
+                &mut self.message_id,
+                max_events_per_message,
+                &mut sink,
+            );
+            let t = start.elapsed().as_micros();
+            println!(
+                "Emitting frame with {} events took {} us",
+                completed_frame.num_events(),
+                t
+            );
         }
     }
 
@@ -148,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_apply_metadata_to_frame() {
-        let mut frame_queue = FrameQueue::new(0, 10);
+        let mut frame_queue = FrameQueue::new(0, 10, 0);
 
         frame_queue.apply_to_frame(1, |frame| {
             frame.set_metadata(Some(0b11010011), None, Some(3))

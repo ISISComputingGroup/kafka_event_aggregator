@@ -1,4 +1,4 @@
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use flatbuffers::FlatBufferBuilder;
 use kafka_event_aggregator::ev44_events_generated::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
@@ -22,8 +22,8 @@ fn make_fake_events(num: usize) -> Vec<Event> {
 
 const BYTES_PER_EVENT: usize = 8;
 
-fn benchmark_sort_and_emit_events(c: &mut Criterion) {
-    let mut group = c.benchmark_group("sort_and_emit_events");
+fn benchmark_emit_events(c: &mut Criterion) {
+    let mut group = c.benchmark_group("emit_events");
     for events_per_frame in [
         1000,       // Approx 3 mbps at 50Hz
         100_000,    // Approx 300 mbps at 50Hz
@@ -39,17 +39,21 @@ fn benchmark_sort_and_emit_events(c: &mut Criterion) {
             BenchmarkId::from_parameter(events_per_frame),
             &events_per_frame,
             |b, events_per_frame| {
-                let events = make_fake_events(*events_per_frame);
                 let mut fbb = FlatBufferBuilder::new();
 
-                b.iter(|| {
-                    let mut frame = Frame::new_with_reference_time(0, 0);
-                    frame.append_events(events.iter().copied());
-                    frame.sort_by_tof();
-                    frame.emit_messages(&mut fbb, 1_000, |timestamp, msg| {
-                        black_box((timestamp, msg));
-                    });
-                });
+                b.iter_batched_ref(
+                    || {
+                        let mut frame = Frame::new_with_reference_time(0, 0);
+                        frame.append_events(make_fake_events(*events_per_frame).into_iter());
+                        frame
+                    },
+                    |frame| {
+                        frame.emit_messages(&mut fbb, &mut 0, 100_000, |timestamp, msg| {
+                            black_box((timestamp, msg));
+                        });
+                    },
+                    BatchSize::LargeInput,
+                );
             },
         );
     }
@@ -58,7 +62,7 @@ fn benchmark_sort_and_emit_events(c: &mut Criterion) {
 fn benchmark_process_raw_messages(c: &mut Criterion) {
     const NUM_FRAMES: i64 = 100;
     const MESSAGES_PER_FRAME: usize = 100;
-    const EVENTS_PER_FRAME: usize = 500;
+    const EVENTS_PER_MESSAGE: usize = 500;
 
     let messages = (0..NUM_FRAMES) // 1000 different reference times
         .flat_map(|n| [n; MESSAGES_PER_FRAME]) // each reference time appears 100 times
@@ -69,8 +73,8 @@ fn benchmark_process_raw_messages(c: &mut Criterion) {
                 message_id: 0,
                 reference_time: Some(fbb.create_vector(&[t])),
                 reference_time_index: Some(fbb.create_vector(&[0])),
-                time_of_flight: Some(fbb.create_vector(&[0; EVENTS_PER_FRAME])),
-                pixel_id: Some(fbb.create_vector(&[0; EVENTS_PER_FRAME])),
+                time_of_flight: Some(fbb.create_vector(&[0; EVENTS_PER_MESSAGE])),
+                pixel_id: Some(fbb.create_vector(&[0; EVENTS_PER_MESSAGE])),
             };
 
             let ev44 = Event44Message::create(&mut fbb, &args);
@@ -86,21 +90,20 @@ fn benchmark_process_raw_messages(c: &mut Criterion) {
 
     group.bench_function("process_raw_message", |b| {
         b.iter(|| {
-            let mut queue = FrameQueue::new(0, 0);
+            let mut queue = FrameQueue::new(0, 0, 0);
 
             messages
                 .iter()
                 .for_each(|msg| queue.process_raw_message(msg));
 
             assert_eq!(queue.len(), NUM_FRAMES as usize);
-            black_box(queue);
         })
     });
 }
 
 criterion_group!(
     benches,
-    benchmark_sort_and_emit_events,
+    benchmark_emit_events,
     benchmark_process_raw_messages
 );
 criterion_main!(benches);
