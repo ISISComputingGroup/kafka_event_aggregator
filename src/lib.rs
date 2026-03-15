@@ -64,4 +64,5 @@ pub mod config;
 pub mod deserialization;
 pub mod frame;
 pub mod kafka;
+pub mod metrics;
 pub mod queue;

@@ -1,15 +1,39 @@
+# Kafka topic to consume from.
 input_topic = 'somemachine_rawEvents'
+
+# Kafka topic to write aggregated events to.
 output_topic = 'somemachine_events'
 
+# Frequency at which the queue of frames is checked for expired frames (milliseconds).
 frame_queue_poll_interval_ms = 100
+
+# Maximum number of neutron events to write to a single output message, before
+# starting a new message.
 max_events_per_message = 100000
+
+# If two neutron events (or their corresponding frame headers) have equal
+# reference times to within this precision, they are considered the same frame
+# (and therefore events will be merged).
 reference_time_tolerance_ns = 100
+
+# Expiry offset.
+# After the *first* message in a frame is received, all other messages for that
+# frame are expected to be delievered within this time interval.
+# Note: this adds to the latency of the `_events` output stream.
 expiry_offset_ms = 500
 
+# Source name in output messages.
+source_name = "kafka-event-aggregator"
+
+# Address on which to serve metrics via prometheus.
+metrics_bind_addr = "localhost:8484"
+
+# Kafka configuration parameters (producer)
 [kafka_producer]
 "bootstrap.servers" = "livedata.isis.cclrc.ac.uk:31092"
 "enable.idempotence" = "true"
 
+# Kafka configuration parameters (consumer)
 [kafka_consumer]
 "bootstrap.servers" = "livedata.isis.cclrc.ac.uk:31092"
 "group.id" = "kafka-event-aggregator-somemachine"

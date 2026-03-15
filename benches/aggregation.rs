@@ -54,7 +54,8 @@ fn benchmark_emit_events(c: &mut Criterion) {
                 b.iter_batched_ref(
                     || {
                         let mut frame = Frame::new(0, &config);
-                        frame.set_metadata(Some(0), Some(0.), Some(0));
+                        frame.set_period(1);
+                        frame.set_protons_per_pulse(1.0);
                         frame.append_events(make_fake_events(*events_per_frame).into_iter());
                         frame
                     },

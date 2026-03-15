@@ -1,11 +1,14 @@
-use anyhow::bail;
 use clap::Parser;
 use flatbuffers::FlatBufferBuilder;
 use futures::stream::StreamExt;
 use kafka_event_aggregator::config::config_from_str;
 use kafka_event_aggregator::kafka::{make_consumer, make_producer};
+use kafka_event_aggregator::metrics::{
+    OUTGOING_KAFKA_ERRORS, OUTGOING_MESSAGE_SIZE, QUEUE_FRAMES, initialize_metrics,
+};
 use kafka_event_aggregator::queue::FrameQueue;
-use log::{info, warn};
+use log::{error, info, warn};
+use metrics::{counter, gauge};
 use rdkafka::Message;
 use rdkafka::producer::BaseRecord;
 use std::time::Duration;
@@ -23,7 +26,7 @@ struct Args {
     verbosity: clap_verbosity_flag::Verbosity,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     let args = Args::try_parse()?;
 
@@ -33,6 +36,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = config_from_str(&std::fs::read_to_string(args.config)?)?;
+
+    initialize_metrics(&config)?;
 
     let consumer = make_consumer(&config)?;
     let mut stream = consumer.stream();
@@ -57,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
                         warn!("Received event without payload; ignoring.");
                     }
                 } else {
-                    bail!("Error reading from stream {:?}", msg);
+                    error!("Error reading from stream {:?}", msg);
                 }
             },
             _ = frame_queue_poll_interval.tick() => {
@@ -67,11 +72,15 @@ async fn main() -> anyhow::Result<()> {
                             .payload(msg)
                             .timestamp(timestamp)
                     );
+                    counter!(OUTGOING_MESSAGE_SIZE).increment(msg.len() as u64);
 
                     if let Err((e, _)) = result {
                         warn!("Error sending message to kafka: {:?}", e);
+                        counter!(OUTGOING_KAFKA_ERRORS).increment(1);
                     }
                 });
+
+                gauge!(QUEUE_FRAMES).set(frame_queue.len() as f64);
             },
             _ = ctrl_c() => {
                 info!("Shutting down after ctrl-c");

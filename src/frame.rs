@@ -4,16 +4,18 @@ use crate::config::AggregatorConfig;
 use crate::ev44_events_generated::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
 };
+use crate::metrics::{
+    OUTGOING_DROPPED_FRAMES_NO_METADATA, OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA,
+    OUTGOING_EVENT_MESSAGES, OUTGOING_FRAMES, OUTGOING_METADATA_MESSAGES, OUTGOING_NEUTRON_EVENTS,
+};
 use crate::pu00_pulse_metadata_generated::{
     Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer,
 };
 use flatbuffers::FlatBufferBuilder;
 use log::warn;
+use metrics::counter;
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
-
-/// Source name for messages aggregated by this program.
-const SOURCE_NAME: &str = "kafka_event_aggregator";
 
 /// Representation of a single neutron event
 #[derive(Debug, Copy, Clone)]
@@ -100,22 +102,16 @@ impl Frame {
         Instant::now() >= self.ttl_deadline
     }
 
-    /// Assign new metadata to a frame.
-    pub fn set_metadata(
-        &mut self,
-        vetos: Option<u32>,
-        protons_per_pulse: Option<f32>,
-        period: Option<u32>,
-    ) {
-        if let Some(vetos) = vetos {
-            self.vetos |= vetos;
-        }
-        if let Some(protons_per_pulse) = protons_per_pulse {
-            self.protons_per_pulse = Some(protons_per_pulse);
-        }
-        if let Some(period) = period {
-            self.period = Some(period);
-        }
+    pub fn add_vetos(&mut self, vetos: u32) {
+        self.vetos |= vetos;
+    }
+
+    pub fn set_protons_per_pulse(&mut self, protons_per_pulse: f32) {
+        self.protons_per_pulse = Some(protons_per_pulse);
+    }
+
+    pub fn set_period(&mut self, period: u32) {
+        self.period = Some(period);
     }
 
     /// Append new events to this frame from an iterator.
@@ -130,12 +126,17 @@ impl Frame {
     }
 
     /// Emit a pu00 (frame metadata) message for this frame to the provided sink.
-    fn emit_pu00_message<F>(&self, fbb: &'_ mut FlatBufferBuilder<'_>, message_id: i64, mut sink: F)
-    where
+    fn emit_pu00_message<F>(
+        &self,
+        fbb: &'_ mut FlatBufferBuilder<'_>,
+        message_id: i64,
+        config: &AggregatorConfig,
+        mut sink: F,
+    ) where
         F: FnMut(i64, &[u8]),
     {
         let args = Pu00MessageArgs {
-            source_name: Some(fbb.create_string(SOURCE_NAME)),
+            source_name: Some(fbb.create_string(&config.source_name)),
             message_id,
             proton_charge: self.protons_per_pulse,
             vetos: Some(self.vetos),
@@ -147,6 +148,7 @@ impl Frame {
         finish_pu_00_message_buffer(fbb, pu00);
         sink(self.kafka_timestamp(), fbb.finished_data());
         fbb.reset();
+        counter!(OUTGOING_METADATA_MESSAGES).increment(1);
     }
 
     /// Emit an ev44 message for the provided events to the specified sink.
@@ -155,6 +157,7 @@ impl Frame {
         fbb: &'_ mut FlatBufferBuilder<'_>,
         message_id: i64,
         events: &[Event],
+        config: &AggregatorConfig,
         mut sink: F,
     ) where
         F: FnMut(i64, &[u8]),
@@ -163,7 +166,7 @@ impl Frame {
         let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
 
         let args = Event44MessageArgs {
-            source_name: Some(fbb.create_string(SOURCE_NAME)),
+            source_name: Some(fbb.create_string(&config.source_name)),
             message_id,
             reference_time: Some(fbb.create_vector(&[self.reference_time])),
             reference_time_index: Some(fbb.create_vector(&[0])),
@@ -175,6 +178,7 @@ impl Frame {
         finish_event_44_message_buffer(fbb, ev44);
         sink(self.kafka_timestamp(), fbb.finished_data());
         fbb.reset();
+        counter!(OUTGOING_EVENT_MESSAGES).increment(1);
     }
 
     /// Emit pu00 and ev44 messages representing this frame to the specified sink.
@@ -193,19 +197,25 @@ impl Frame {
             This can occur if an event message and it's corresponding metadata are not \
             received within expiry_offset_ms of each other."
             );
+            counter!(OUTGOING_DROPPED_FRAMES_NO_METADATA).increment(1);
+            counter!(OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA)
+                .increment(self.events.len() as u64);
             return;
         }
         self.sort_by_tof();
 
-        self.emit_pu00_message(fbb, *message_id, &mut sink);
+        self.emit_pu00_message(fbb, *message_id, config, &mut sink);
         *message_id += 1;
 
         self.events
             .chunks(config.max_events_per_message)
             .for_each(|chunk| {
-                self.emit_ev44_message(fbb, *message_id, chunk, &mut sink);
+                self.emit_ev44_message(fbb, *message_id, chunk, config, &mut sink);
                 *message_id += 1;
-            })
+            });
+
+        counter!(OUTGOING_FRAMES).increment(1);
+        counter!(OUTGOING_NEUTRON_EVENTS).increment(self.events.len() as u64);
     }
 }
 

@@ -5,9 +5,14 @@ use crate::config::AggregatorConfig;
 use crate::deserialization::{ReceivedMessage, deserialize};
 use crate::ev44_events_generated::Event44Message;
 use crate::frame::{Event, Frame};
+use crate::metrics::{
+    INCOMING_EVENT_MESSAGES_PROCESSED, INCOMING_INVALID_MESSAGES_DISCARDED, INCOMING_MESSAGE_SIZE,
+    INCOMING_MESSAGES_PROCESSED, INCOMING_METADATA_MESSAGES_PROCESSED, INCOMING_NEUTRON_EVENTS,
+};
 use crate::pu00_pulse_metadata_generated::Pu00Message;
 use flatbuffers::FlatBufferBuilder;
 use log::{debug, warn};
+use metrics::counter;
 use std::collections::VecDeque;
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
@@ -61,10 +66,6 @@ impl<'a> FrameQueue<'a> {
                 completed_frame.reference_time()
             );
             completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
-            debug!(
-                "Sent expired frame (reference_time={})",
-                completed_frame.reference_time()
-            );
         }
     }
 
@@ -105,7 +106,15 @@ impl<'a> FrameQueue<'a> {
     pub fn process_raw_pu00_metadata_message(&mut self, msg: &Pu00Message) {
         let reference_time = msg.reference_time();
         self.apply_to_frame(reference_time, |frame| {
-            frame.set_metadata(msg.vetos(), msg.proton_charge(), msg.period_number());
+            if let Some(vetos) = msg.vetos() {
+                frame.add_vetos(vetos);
+            }
+            if let Some(protons_per_pulse) = msg.proton_charge() {
+                frame.set_protons_per_pulse(protons_per_pulse);
+            }
+            if let Some(period_number) = msg.period_number() {
+                frame.set_period(period_number);
+            }
         })
     }
 
@@ -115,6 +124,7 @@ impl<'a> FrameQueue<'a> {
                 if let Some(tofs) = msg.time_of_flight()
                     && let Some(pixel_ids) = msg.pixel_id()
                 {
+                    counter!(INCOMING_NEUTRON_EVENTS).increment(tofs.len() as u64);
                     frame.append_events(
                         tofs.into_iter()
                             .zip(pixel_ids)
@@ -134,12 +144,22 @@ impl<'a> FrameQueue<'a> {
 
     pub fn process_raw_message(&mut self, msg: &[u8]) {
         match deserialize(msg) {
-            Ok(ReceivedMessage::Ev44(data)) => self.process_raw_ev44_message(&data),
-            Ok(ReceivedMessage::Pu00(data)) => self.process_raw_pu00_metadata_message(&data),
+            Ok(ReceivedMessage::Ev44(data)) => {
+                self.process_raw_ev44_message(&data);
+                counter!(INCOMING_EVENT_MESSAGES_PROCESSED).increment(1);
+            }
+            Ok(ReceivedMessage::Pu00(data)) => {
+                self.process_raw_pu00_metadata_message(&data);
+                counter!(INCOMING_METADATA_MESSAGES_PROCESSED).increment(1);
+            }
             Err(e) => {
                 warn!("Cannot deserialize message: {e}");
+                counter!(INCOMING_INVALID_MESSAGES_DISCARDED).increment(1);
             }
         }
+
+        counter!(INCOMING_MESSAGES_PROCESSED).increment(1);
+        counter!(INCOMING_MESSAGE_SIZE).increment(msg.len() as u64);
     }
 }
 
@@ -157,19 +177,24 @@ mod tests {
         let mut frame_queue = FrameQueue::new(&config, 10);
 
         frame_queue.apply_to_frame(1, |frame| {
-            frame.set_metadata(Some(0b11010011), None, Some(3))
+            frame.add_vetos(0b11010011);
+            frame.set_period(3);
         });
         assert_eq!(frame_queue.len(), 1);
 
         // Reference time within 10ns of above frame; should add to that same frame
         // ORing together vetos and overwriting period if provided
         frame_queue.apply_to_frame(5, |frame| {
-            frame.set_metadata(Some(0b11110000), None, Some(5))
+            frame.add_vetos(0b11110000);
+            frame.set_period(5);
         });
         assert_eq!(frame_queue.len(), 1);
 
         // Reference time outside 10ns of first frame; should add a new frame
-        frame_queue.apply_to_frame(15, |frame| frame.set_metadata(Some(0), None, Some(6)));
+        frame_queue.apply_to_frame(15, |frame| {
+            frame.add_vetos(0);
+            frame.set_period(6);
+        });
         assert_eq!(frame_queue.len(), 2);
 
         assert_eq!(frame_queue.frames[0].period(), Some(5));
