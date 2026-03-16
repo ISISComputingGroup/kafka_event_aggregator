@@ -131,9 +131,9 @@ impl Frame {
         fbb: &'_ mut FlatBufferBuilder<'_>,
         message_id: i64,
         config: &AggregatorConfig,
-        mut sink: F,
+        sink: F,
     ) where
-        F: FnMut(i64, &[u8]),
+        F: FnOnce(i64, &[u8]),
     {
         let args = Pu00MessageArgs {
             source_name: Some(fbb.create_string(&config.source_name)),
@@ -158,9 +158,9 @@ impl Frame {
         message_id: i64,
         events: &[Event],
         config: &AggregatorConfig,
-        mut sink: F,
+        sink: F,
     ) where
-        F: FnMut(i64, &[u8]),
+        F: FnOnce(i64, &[u8]),
     {
         let tofs = fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
         let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
@@ -191,7 +191,7 @@ impl Frame {
     ) where
         F: FnMut(i64, &[u8]),
     {
-        if self.protons_per_pulse.is_none() || self.period.is_none() {
+        if false && (self.protons_per_pulse.is_none() || self.period.is_none()) {
             warn!(
                 "Failed to emit partial frame; required metadata for this frame was not present. \
             This can occur if an event message and it's corresponding metadata are not \
