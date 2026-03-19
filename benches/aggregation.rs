@@ -1,9 +1,9 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use flatbuffers::FlatBufferBuilder;
-use kafka_event_aggregator::config::AggregatorConfig;
-use kafka_event_aggregator::ev44_events_generated::{
+use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
 };
+use kafka_event_aggregator::config::AggregatorConfig;
 use kafka_event_aggregator::frame::{Event, Frame};
 use kafka_event_aggregator::queue::FrameQueue;
 use rand::prelude::*;

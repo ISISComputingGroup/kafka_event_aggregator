@@ -1,17 +1,17 @@
 //! Internal representation of a frame of data.
 
 use crate::config::AggregatorConfig;
-use crate::ev44_events_generated::{
-    Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
-};
 use crate::metrics::{
     OUTGOING_DROPPED_FRAMES_NO_METADATA, OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA,
     OUTGOING_EVENT_MESSAGES, OUTGOING_FRAMES, OUTGOING_METADATA_MESSAGES, OUTGOING_NEUTRON_EVENTS,
 };
-use crate::pu00_pulse_metadata_generated::{
+use flatbuffers::FlatBufferBuilder;
+use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
+    Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
+};
+use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{
     Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer,
 };
-use flatbuffers::FlatBufferBuilder;
 use log::warn;
 use metrics::counter;
 use rayon::prelude::*;
@@ -225,8 +225,8 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ev44_events_generated::root_as_event_44_message;
-    use crate::pu00_pulse_metadata_generated::root_as_pu_00_message;
+    use isis_streaming_data_types::flatbuffers_generated::events_ev44::root_as_event_44_message;
+    use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::root_as_pu_00_message;
 
     #[test]
     fn test_emit_messages() {

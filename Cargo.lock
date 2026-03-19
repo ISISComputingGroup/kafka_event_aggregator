@@ -467,15 +467,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flatc-rust"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57e61227926ef5b237af48bee74394cc4a5a221ebd10c5147a98e612f207851d"
-dependencies = [
- "log",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -814,6 +805,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "isis_streaming_data_types"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "470be50383d88e3010588fa9d6e98466a8f0c718b1b50c91ad51116c7b44a6b5"
+dependencies = [
+ "flatbuffers",
+]
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -882,8 +882,8 @@ dependencies = [
  "criterion",
  "env_logger",
  "flatbuffers",
- "flatc-rust",
  "futures",
+ "isis_streaming_data_types",
  "log",
  "metrics",
  "metrics-exporter-prometheus",

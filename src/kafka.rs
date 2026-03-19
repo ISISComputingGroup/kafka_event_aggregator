@@ -98,7 +98,7 @@ pub fn get_most_recent_message_id(config: &AggregatorConfig) -> Result<i64> {
     metadata
         .topics()
         .iter()
-        .find(|t| t.name() == &config.output_topic)
+        .find(|t| t.name() == config.output_topic)
         .with_context(|| "Cannot get topic")?
         .partitions()
         .iter()

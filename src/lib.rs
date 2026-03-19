@@ -49,18 +49,6 @@
 //!   stream within `expiry_offset_ms` of the *first* message for that frame arriving. Events that
 //!   come in too late are dropped.
 
-#[allow(clippy::all)]
-#[rustfmt::skip]
-#[allow(dead_code, unused, non_snake_case)]
-#[path = "flatbuffers_generated/ev44_events_generated.rs"]
-pub mod ev44_events_generated;
-
-#[allow(clippy::all)]
-#[rustfmt::skip]
-#[allow(dead_code, unused, non_snake_case)]
-#[path = "flatbuffers_generated/pu00_pulse_metadata_generated.rs"]
-pub mod pu00_pulse_metadata_generated;
-
 pub mod config;
 pub mod deserialization;
 pub mod frame;

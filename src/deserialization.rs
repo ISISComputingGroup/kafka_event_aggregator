@@ -1,7 +1,11 @@
 //! Flatbuffer deserialization utilities.
 
-use crate::ev44_events_generated::{Event44Message, root_as_event_44_message};
-use crate::pu00_pulse_metadata_generated::{Pu00Message, root_as_pu_00_message};
+use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
+    Event44Message, root_as_event_44_message,
+};
+use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{
+    Pu00Message, root_as_pu_00_message,
+};
 
 /// A message received from Kafka on the _rawEvents topic, which may be:
 /// - A `pu00` message from the streaming control board
@@ -44,9 +48,13 @@ pub fn deserialize(value: &[u8]) -> Result<ReceivedMessage<'_>, String> {
 mod tests {
     use super::*;
     use crate::deserialization::ReceivedMessage::{Ev44, Pu00};
-    use crate::ev44_events_generated::{Event44MessageArgs, finish_event_44_message_buffer};
-    use crate::pu00_pulse_metadata_generated::{Pu00MessageArgs, finish_pu_00_message_buffer};
     use flatbuffers::FlatBufferBuilder;
+    use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
+        Event44MessageArgs, finish_event_44_message_buffer,
+    };
+    use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{
+        Pu00MessageArgs, finish_pu_00_message_buffer,
+    };
 
     #[test]
     fn test_deserialize_pu00() {
