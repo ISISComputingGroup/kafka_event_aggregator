@@ -11,7 +11,7 @@ use crate::metrics::{
 };
 use crate::pu00_pulse_metadata_generated::Pu00Message;
 use flatbuffers::FlatBufferBuilder;
-use log::{debug, warn};
+use log::{trace, warn};
 use metrics::counter;
 use std::collections::VecDeque;
 
@@ -61,9 +61,10 @@ impl<'a> FrameQueue<'a> {
                 .pop_front()
                 .expect("unreachable; frames is empty after checking first frame exists");
 
-            debug!(
-                "Sending expired frame (reference_time={})",
-                completed_frame.reference_time()
+            trace!(
+                "Sending expired frame (reference_time={}, neutron_events={})",
+                completed_frame.reference_time(),
+                completed_frame.num_events(),
             );
             completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
         }

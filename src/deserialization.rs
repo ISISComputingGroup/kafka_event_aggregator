@@ -12,6 +12,15 @@ pub enum ReceivedMessage<'a> {
     Pu00(Pu00Message<'a>),
 }
 
+impl ReceivedMessage<'_> {
+    pub fn message_id(&self) -> i64 {
+        match self {
+            ReceivedMessage::Ev44(ev44_message) => ev44_message.message_id(),
+            ReceivedMessage::Pu00(pu00_message) => pu00_message.message_id(),
+        }
+    }
+}
+
 /// Deserialize a message from the `_rawEvents` Kafka topic.
 pub fn deserialize(value: &[u8]) -> Result<ReceivedMessage<'_>, String> {
     let identifier = value

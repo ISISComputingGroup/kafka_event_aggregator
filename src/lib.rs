@@ -23,12 +23,13 @@
 //! Consumers of the `_events` stream may make the following assumptions:
 //! - When the stream is sorted by `message_id`, the most recently seen `pu00` message contains the
 //!   metadata relevant to the neutron events until the next `pu00` message. The messages are
-//!   emitted in order by `message_id`, using an idempotent Kafka producer, but if the `_events`
-//!   stream is distributed across multiple Kafka partitions then it is not guaranteed to be
-//!   received in order. If the `_events` stream is on a single partition, ordering by `message_id`
-//!   is equivalent to the message order in Kafka.
+//!   emitted in order by `message_id`, but if the `_events` stream is distributed across multiple
+//!   Kafka partitions then it is not guaranteed to be received in order.
+//!   If the `_events` stream is on a single partition, ordering by `message_id`
+//!   is equivalent to the message order in Kafka (as long as `enable.idempotence = true` in the
+//!   producer)
 //! - Events will be emitted ordered in time-of-flight, both within a single `ev44` message and
-//!   across multiple `ev44` messages within one frame.
+//!   across multiple `ev44` messages within one frame, if `sort_events_by_tof = true`.
 //! - Each `ev44` on the `_events` stream will contain at most `max_events_per_message` events
 //! - The `reference_time` of all `pu00` and `ev44` messages which make up a frame will be
 //!   identical.

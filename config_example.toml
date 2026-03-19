@@ -26,7 +26,10 @@ expiry_offset_ms = 500
 source_name = "kafka-event-aggregator"
 
 # Address on which to serve metrics via prometheus.
-metrics_bind_addr = "localhost:8484"
+metrics_bind_addr = "127.0.0.1:8484"
+
+# Whether to sort outgoing events by time-of-flight.
+sort_events_by_tof = true
 
 # Kafka configuration parameters (producer)
 [kafka_producer]

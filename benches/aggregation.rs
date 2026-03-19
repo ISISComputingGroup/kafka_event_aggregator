@@ -13,6 +13,7 @@ use std::hint::black_box;
 fn make_config() -> AggregatorConfig {
     AggregatorConfig {
         max_events_per_message: 100_000,
+        sort_events_by_tof: true,
         ..Default::default()
     }
 }

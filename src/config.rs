@@ -9,6 +9,7 @@ pub struct AggregatorConfig {
     pub reference_time_tolerance_ns: u64,
     pub max_events_per_message: usize,
     pub expiry_offset_ms: u64,
+    pub sort_events_by_tof: bool,
     pub source_name: String,
     pub metrics_bind_addr: String,
     pub kafka_producer: HashMap<String, String>,
@@ -36,6 +37,7 @@ reference_time_tolerance_ns = 100
 expiry_offset_ms = 100
 source_name = 'kafka_event_aggregator'
 metrics_bind_addr = '127.0.0.1:1234'
+sort_events_by_tof = true
 
 [kafka_producer]
 foo = 'bar'
