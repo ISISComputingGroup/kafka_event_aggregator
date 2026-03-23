@@ -1,7 +1,6 @@
 //! Kafka utilities.
 
 use crate::config::AggregatorConfig;
-use crate::deserialization::deserialize;
 use anyhow::{Context, Result, bail};
 use log::{debug, warn};
 use rdkafka::Offset::Offset;
@@ -9,6 +8,7 @@ use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext, StreamCo
 use rdkafka::producer::{DefaultProducerContext, ThreadedProducer};
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use std::time::Duration;
+use isis_streaming_data_types::{deserialize_message, DeserializedMessage};
 
 pub fn make_consumer(config: &AggregatorConfig) -> Result<StreamConsumer<DefaultConsumerContext>> {
     let mut client_config = ClientConfig::new();
@@ -56,8 +56,9 @@ fn latest_message_on_one_partition(
             return match msg {
                 Ok(message) => {
                     if let Some(payload) = message.payload() {
-                        match deserialize(payload) {
-                            Ok(msg) => Ok(msg.message_id()),
+                        match deserialize_message(payload) {
+                            Ok(DeserializedMessage::EventDataEv44(msg)) => Ok(msg.message_id()),
+                            Ok(DeserializedMessage::PulseMetadataPu00(msg)) => Ok(msg.message_id()),
                             _ => {
                                 bail!(
                                     "Cannot deserialize latest message on partition {}",

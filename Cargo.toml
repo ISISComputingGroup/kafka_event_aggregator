@@ -16,7 +16,7 @@ clap-verbosity-flag = "3.0.4"
 anyhow = "1.0.102"
 metrics = "0.24.3"
 metrics-exporter-prometheus = { version = "0.18.1" }
-isis_streaming_data_types = { version = "0.0.6"}
+isis_streaming_data_types = { version = "0.1.0"}
 flatbuffers = "*"
 
 [target.'cfg(windows)'.dependencies]

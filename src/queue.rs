@@ -2,7 +2,6 @@
 //! Kafka once their time-to-live expires.
 
 use crate::config::AggregatorConfig;
-use crate::deserialization::{ReceivedMessage, deserialize};
 use crate::frame::{Event, Frame};
 use crate::metrics::{
     INCOMING_EVENT_MESSAGES_PROCESSED, INCOMING_INVALID_MESSAGES_DISCARDED, INCOMING_MESSAGE_SIZE,
@@ -14,6 +13,7 @@ use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::Pu00M
 use log::{trace, warn};
 use metrics::counter;
 use std::collections::VecDeque;
+use isis_streaming_data_types::{deserialize_message, DeserializedMessage, get_schema_id};
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
 /// in the rawEvents Kafka consumer (which is also ordered by time-to-live).
@@ -144,17 +144,20 @@ impl<'a> FrameQueue<'a> {
     }
 
     pub fn process_raw_message(&mut self, msg: &[u8]) {
-        match deserialize(msg) {
-            Ok(ReceivedMessage::Ev44(data)) => {
+        match deserialize_message(msg) {
+            Ok(DeserializedMessage::EventDataEv44(data)) => {
                 self.process_raw_ev44_message(&data);
                 counter!(INCOMING_EVENT_MESSAGES_PROCESSED).increment(1);
             }
-            Ok(ReceivedMessage::Pu00(data)) => {
+            Ok(DeserializedMessage::PulseMetadataPu00(data)) => {
                 self.process_raw_pu00_metadata_message(&data);
                 counter!(INCOMING_METADATA_MESSAGES_PROCESSED).increment(1);
             }
+            Ok(_) => {
+                warn!("Unhandled message type: {:?}", get_schema_id(msg));
+            }
             Err(e) => {
-                warn!("Cannot deserialize message: {e}");
+                warn!("Cannot deserialize message: {e:?}");
                 counter!(INCOMING_INVALID_MESSAGES_DISCARDED).increment(1);
             }
         }

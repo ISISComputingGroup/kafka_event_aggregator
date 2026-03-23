@@ -50,7 +50,6 @@
 //!   come in too late are dropped.
 
 pub mod config;
-pub mod deserialization;
 pub mod frame;
 pub mod kafka;
 pub mod metrics;
