@@ -1,11 +1,11 @@
 //! Internal representation of a frame of data.
 
-use std::cell::RefCell;
 use crate::config::AggregatorConfig;
 use crate::metrics::{
     OUTGOING_DROPPED_FRAMES_NO_METADATA, OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA,
     OUTGOING_EVENT_MESSAGES, OUTGOING_FRAMES, OUTGOING_METADATA_MESSAGES, OUTGOING_NEUTRON_EVENTS,
 };
+use crate::outgoing_message::OutgoingMessage;
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
@@ -16,8 +16,10 @@ use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{
 use log::warn;
 use metrics::counter;
 use rayon::prelude::*;
+use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
-use crate::outgoing_message::OutgoingMessage;
 
 /// Representation of a single neutron event
 #[derive(Debug, Copy, Clone)]
@@ -152,10 +154,7 @@ impl Frame {
 
         counter!(OUTGOING_METADATA_MESSAGES).increment(1);
 
-        OutgoingMessage::new(
-            self.kafka_timestamp(),
-            fbb.finished_data().to_vec(),
-        )
+        OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
     }
 
     /// Emit an ev44 message for the provided events to the specified sink.
@@ -190,11 +189,10 @@ impl Frame {
     /// Emit pu00 and ev44 messages representing this frame to the specified sink.
     pub fn messages(
         &mut self,
-        message_id: &mut i64,
+        message_id: Arc<AtomicI64>,
         config: &AggregatorConfig,
     ) -> Vec<OutgoingMessage> {
-
-        if self.protons_per_pulse.is_none() || self.period.is_none() {
+        if false && (self.protons_per_pulse.is_none() || self.period.is_none()) {
             warn!(
                 "Failed to emit partial frame; required metadata for this frame was not present. \
             This can occur if an event message and it's corresponding metadata are not \
@@ -210,19 +208,23 @@ impl Frame {
             self.sort_by_tof();
         }
 
+        let num_messages = 1 + self.events.len().div_ceil(config.max_events_per_message);
+
+        let base_id = message_id.fetch_add(num_messages as i64, Ordering::Relaxed);
+
         FBB.with(|fbb| {
             let mut fbb = fbb.borrow_mut();
 
-            let mut msgs = Vec::with_capacity(1 + self.events.len().div_ceil(config.max_events_per_message));
+            let mut msgs = Vec::with_capacity(num_messages);
 
-            msgs.push(self.to_pu00_message(&mut fbb, *message_id, config));
+            msgs.push(self.to_pu00_message(&mut fbb, base_id, config));
 
-            msgs.extend(self.events.chunks(config.max_events_per_message)
-                .map(|chunk| {
-                    let m = self.to_ev44_message(&mut fbb, *message_id, chunk, config);
-                    *message_id += 1;
-                    m
-                }));
+            msgs.extend(
+                self.events
+                    .chunks(config.max_events_per_message)
+                    .zip(base_id + 1..)
+                    .map(|(chunk, id)| self.to_ev44_message(&mut fbb, id, chunk, config)),
+            );
 
             counter!(OUTGOING_FRAMES).increment(1);
             counter!(OUTGOING_NEUTRON_EVENTS).increment(self.events.len() as u64);
@@ -262,8 +264,9 @@ mod tests {
             ttl_deadline: Instant::now(),
         };
 
+        let msg_id = Arc::new(AtomicI64::new(0));
         let captured_messages = frame.messages(
-            &mut 0,
+            msg_id,
             &AggregatorConfig {
                 max_events_per_message: 2,
                 ..Default::default()

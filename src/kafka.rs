@@ -2,13 +2,13 @@
 
 use crate::config::AggregatorConfig;
 use anyhow::{Context, Result, bail};
+use isis_streaming_data_types::{DeserializedMessage, deserialize_message};
 use log::{debug, warn};
 use rdkafka::Offset::Offset;
 use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::producer::{DefaultProducerContext, ThreadedProducer};
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use std::time::Duration;
-use isis_streaming_data_types::{deserialize_message, DeserializedMessage};
 
 pub fn make_consumer(config: &AggregatorConfig) -> Result<StreamConsumer<DefaultConsumerContext>> {
     let mut client_config = ClientConfig::new();

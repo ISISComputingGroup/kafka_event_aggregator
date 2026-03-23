@@ -4,7 +4,6 @@ pub struct OutgoingMessage {
 }
 
 impl OutgoingMessage {
-
     pub fn new(timestamp: i64, bytes: Vec<u8>) -> OutgoingMessage {
         OutgoingMessage { timestamp, bytes }
     }

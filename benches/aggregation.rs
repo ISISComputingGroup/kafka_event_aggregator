@@ -14,6 +14,7 @@ fn make_config() -> AggregatorConfig {
     AggregatorConfig {
         max_events_per_message: 100_000,
         sort_events_by_tof: true,
+        expiry_offset_ms: 0,
         ..Default::default()
     }
 }
@@ -32,36 +33,41 @@ fn make_fake_events(num: usize) -> Vec<Event> {
 const BYTES_PER_EVENT: usize = 8;
 
 fn benchmark_emit_events(c: &mut Criterion) {
+    const NUM_FRAMES: u64 = 5;  // Frame queue poll time of 100ms, 50Hz frames
     let config = make_config();
 
     let mut group = c.benchmark_group("emit_events");
     for events_per_frame in [
-        1000,       // Approx 3 mbps at 50Hz
-        100_000,    // Approx 300 mbps at 50Hz
-        10_000_000, // Approx 30 gbps at 50Hz
+        1000,      // Approx 3 mbps at 50Hz
+        10_000,    // Approx 30 mbps at 50Hz
+        100_000,   // Approx 300 mbps at 50Hz
+        1_000_000, // Approx 3 gbps at 50Hz
     ]
     .into_iter()
     {
         group.throughput(Throughput::ElementsAndBytes {
-            elements: events_per_frame as u64,
-            bytes: (events_per_frame * BYTES_PER_EVENT) as u64,
+            elements: events_per_frame as u64 * NUM_FRAMES,
+            bytes: (events_per_frame as u64 * BYTES_PER_EVENT as u64 * NUM_FRAMES),
         });
+
         group.bench_with_input(
             BenchmarkId::from_parameter(events_per_frame),
             &events_per_frame,
             |b, events_per_frame| {
                 b.iter_batched_ref(
                     || {
-                        let mut frame = Frame::new(0, &config);
-                        frame.set_period(1);
-                        frame.set_protons_per_pulse(1.0);
-                        frame.append_events(make_fake_events(*events_per_frame).into_iter());
-                        frame
+                        let mut frame_queue = FrameQueue::new(&config, 0);
+                        for _ in 0..NUM_FRAMES {
+                            let mut frame = Frame::new(0, &config);
+                            frame.set_period(1);
+                            frame.set_protons_per_pulse(1.0);
+                            frame.append_events(make_fake_events(*events_per_frame).into_iter());
+                            frame_queue.push_frame(frame)
+                        }
+                        frame_queue
                     },
-                    |frame| {
-                        frame.emit_messages(&mut 0, &config, |timestamp, msg| {
-                            black_box((timestamp, msg));
-                        });
+                    |frame_queue: &mut FrameQueue<'_>| {
+                        black_box(frame_queue.messages_for_expired_frames());
                     },
                     BatchSize::LargeInput,
                 );
@@ -73,7 +79,7 @@ fn benchmark_emit_events(c: &mut Criterion) {
 fn benchmark_process_raw_messages(c: &mut Criterion) {
     let config = make_config();
 
-    const NUM_FRAMES: i64 = 100;
+    const NUM_FRAMES: i64 = 1000;
     const MESSAGES_PER_FRAME: usize = 100;
     const EVENTS_PER_MESSAGE: usize = 500;
 
@@ -102,15 +108,17 @@ fn benchmark_process_raw_messages(c: &mut Criterion) {
     ));
 
     group.bench_function("process_raw_message", |b| {
-        b.iter(|| {
-            let mut queue = FrameQueue::new(&config, 0);
+        b.iter_batched_ref(
+            || FrameQueue::new(&config, 0),
+            |queue: &mut FrameQueue| {
+                messages
+                    .iter()
+                    .for_each(|msg| queue.process_raw_message(msg));
 
-            messages
-                .iter()
-                .for_each(|msg| queue.process_raw_message(msg));
-
-            assert_eq!(queue.len(), NUM_FRAMES as usize);
-        })
+                assert_eq!(queue.len(), NUM_FRAMES as usize);
+            },
+            BatchSize::LargeInput,
+        )
     });
 }
 

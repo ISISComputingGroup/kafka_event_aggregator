@@ -7,13 +7,16 @@ use crate::metrics::{
     INCOMING_EVENT_MESSAGES_PROCESSED, INCOMING_INVALID_MESSAGES_DISCARDED, INCOMING_MESSAGE_SIZE,
     INCOMING_MESSAGES_PROCESSED, INCOMING_METADATA_MESSAGES_PROCESSED, INCOMING_NEUTRON_EVENTS,
 };
-use flatbuffers::FlatBufferBuilder;
+use crate::outgoing_message::OutgoingMessage;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::Event44Message;
 use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::Pu00Message;
+use isis_streaming_data_types::{DeserializedMessage, deserialize_message, get_schema_id};
 use log::{trace, warn};
 use metrics::counter;
+use rayon::prelude::*;
 use std::collections::VecDeque;
-use isis_streaming_data_types::{deserialize_message, DeserializedMessage, get_schema_id};
+use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
 /// in the rawEvents Kafka consumer (which is also ordered by time-to-live).
@@ -24,7 +27,7 @@ pub struct FrameQueue<'a> {
     /// How long, in ms, to keep frames in the queue before emitting them
     config: &'a AggregatorConfig,
     /// Message ID
-    message_id: i64,
+    message_id: Arc<AtomicI64>,
 }
 
 impl<'a> FrameQueue<'a> {
@@ -32,7 +35,7 @@ impl<'a> FrameQueue<'a> {
         FrameQueue {
             frames: VecDeque::new(),
             config,
-            message_id: next_message_id,
+            message_id: Arc::new(AtomicI64::new(next_message_id)),
         }
     }
 
@@ -46,17 +49,24 @@ impl<'a> FrameQueue<'a> {
         self.frames.is_empty()
     }
 
-    pub fn send_expired_frames<F>(&mut self, mut sink: F)
-    where
-        F: FnMut(i64, &[u8]),
-    {
+    pub fn push_frame(&mut self, frame: Frame) {
+        self.frames.push_back(frame);
+    }
+
+    pub fn clear(&mut self) {
+        self.frames.clear()
+    }
+
+    pub fn messages_for_expired_frames(&mut self) -> Vec<OutgoingMessage> {
+        let mut completed_frames = vec![];
+
         while self
             .frames
             .front()
             .map(|f| f.is_ttl_expired())
             .unwrap_or(false)
         {
-            let mut completed_frame = self
+            let completed_frame = self
                 .frames
                 .pop_front()
                 .expect("unreachable; frames is empty after checking first frame exists");
@@ -66,8 +76,15 @@ impl<'a> FrameQueue<'a> {
                 completed_frame.reference_time(),
                 completed_frame.num_events(),
             );
-            completed_frame.messages(&mut self.message_id, self.config);
+
+            completed_frames.push(completed_frame);
         }
+
+        completed_frames
+            .par_iter_mut()
+            .map(|frame| frame.messages(self.message_id.clone(), self.config))
+            .flatten()
+            .collect()
     }
 
     /// Applies a mutation to a frame with the given reference time.
@@ -178,7 +195,7 @@ mod tests {
             reference_time_tolerance_ns: 10,
             ..Default::default()
         };
-        let mut frame_queue = FrameQueue::new(&config, 10);
+        let mut frame_queue = FrameQueue::new(&config, 0);
 
         frame_queue.apply_to_frame(1, |frame| {
             frame.add_vetos(0b11010011);

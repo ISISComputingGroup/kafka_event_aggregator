@@ -1,6 +1,3 @@
-use std::borrow::BorrowMut;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
 use clap::Parser;
 use futures::stream::StreamExt;
 use kafka_event_aggregator::config::config_from_str;
@@ -16,7 +13,6 @@ use rdkafka::producer::BaseRecord;
 use std::time::Duration;
 use tokio::select;
 use tokio::signal::ctrl_c;
-use kafka_event_aggregator::outgoing_message::OutgoingMessage;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -63,8 +59,6 @@ async fn main() -> anyhow::Result<()> {
 
     let mut frame_queue = FrameQueue::new(&config, next_message_id);
 
-    let mut out_messages: Arc<Mutex<VecDeque<OutgoingMessage>>> = Arc::new(Mutex::new(VecDeque::new()));
-
     loop {
         select! {
             Some(msg) = stream.next() => {
@@ -79,24 +73,19 @@ async fn main() -> anyhow::Result<()> {
                 }
             },
             _ = frame_queue_poll_interval.tick() => {
-                {
-                    let mut q = out_messages.lock().expect("Lock poisoned");
-                    let q = q.borrow_mut();
-                    while let Some(outgoing_message) = q.pop_front() {
-                        let result = producer.send(
-                            BaseRecord::<[u8], [u8]>::to(&config.output_topic)
-                                .payload(outgoing_message.content())
-                                .timestamp(outgoing_message.timestamp()
-                            ),
+                frame_queue.messages_for_expired_frames().iter().for_each(|msg| {
+                    let result = producer.send(
+                        BaseRecord::<[u8], [u8]>::to(&config.output_topic)
+                            .payload(msg.content())
+                            .timestamp(msg.timestamp()),
                         );
-                        counter!(OUTGOING_MESSAGE_SIZE).increment(outgoing_message.len() as u64);
+                        counter!(OUTGOING_MESSAGE_SIZE).increment(msg.len() as u64);
 
                         if let Err((e, _)) = result {
                             warn!("Error sending message to kafka: {:?}", e);
                             counter!(OUTGOING_KAFKA_ERRORS).increment(1);
                         }
-                    }
-                }
+                });
 
                 gauge!(QUEUE_FRAMES).set(frame_queue.len() as f64);
             },
