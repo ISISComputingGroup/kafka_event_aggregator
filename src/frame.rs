@@ -1,5 +1,6 @@
 //! Internal representation of a frame of data.
 
+use std::cell::RefCell;
 use crate::config::AggregatorConfig;
 use crate::metrics::{
     OUTGOING_DROPPED_FRAMES_NO_METADATA, OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA,
@@ -16,6 +17,7 @@ use log::warn;
 use metrics::counter;
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
+use crate::outgoing_message::OutgoingMessage;
 
 /// Representation of a single neutron event
 #[derive(Debug, Copy, Clone)]
@@ -50,6 +52,10 @@ pub struct Frame {
     events: Vec<Event>,
     /// Frame expiry deadline
     ttl_deadline: Instant,
+}
+
+thread_local! {
+    static FBB: RefCell<FlatBufferBuilder<'static>> = RefCell::new(FlatBufferBuilder::with_capacity(1024));
 }
 
 impl Frame {
@@ -125,16 +131,13 @@ impl Frame {
         self.events.par_sort_unstable_by_key(|e| e.time_of_flight);
     }
 
-    /// Emit a pu00 (frame metadata) message for this frame to the provided sink.
-    fn emit_pu00_message<F>(
+    fn to_pu00_message(
         &self,
         fbb: &'_ mut FlatBufferBuilder<'_>,
         message_id: i64,
         config: &AggregatorConfig,
-        sink: F,
-    ) where
-        F: FnOnce(i64, &[u8]),
-    {
+    ) -> OutgoingMessage {
+        fbb.reset();
         let args = Pu00MessageArgs {
             source_name: Some(fbb.create_string(&config.source_name)),
             message_id,
@@ -146,22 +149,24 @@ impl Frame {
 
         let pu00 = Pu00Message::create(fbb, &args);
         finish_pu_00_message_buffer(fbb, pu00);
-        sink(self.kafka_timestamp(), fbb.finished_data());
-        fbb.reset();
+
         counter!(OUTGOING_METADATA_MESSAGES).increment(1);
+
+        OutgoingMessage::new(
+            self.kafka_timestamp(),
+            fbb.finished_data().to_vec(),
+        )
     }
 
     /// Emit an ev44 message for the provided events to the specified sink.
-    fn emit_ev44_message<F>(
+    fn to_ev44_message(
         &self,
         fbb: &'_ mut FlatBufferBuilder<'_>,
         message_id: i64,
         events: &[Event],
         config: &AggregatorConfig,
-        sink: F,
-    ) where
-        F: FnOnce(i64, &[u8]),
-    {
+    ) -> OutgoingMessage {
+        fbb.reset();
         let tofs = fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
         let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
 
@@ -176,21 +181,19 @@ impl Frame {
 
         let ev44 = Event44Message::create(fbb, &args);
         finish_event_44_message_buffer(fbb, ev44);
-        sink(self.kafka_timestamp(), fbb.finished_data());
-        fbb.reset();
+
         counter!(OUTGOING_EVENT_MESSAGES).increment(1);
+
+        OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
     }
 
     /// Emit pu00 and ev44 messages representing this frame to the specified sink.
-    pub fn emit_messages<F>(
+    pub fn messages(
         &mut self,
-        fbb: &mut FlatBufferBuilder<'_>,
         message_id: &mut i64,
         config: &AggregatorConfig,
-        mut sink: F,
-    ) where
-        F: FnMut(i64, &[u8]),
-    {
+    ) -> Vec<OutgoingMessage> {
+
         if self.protons_per_pulse.is_none() || self.period.is_none() {
             warn!(
                 "Failed to emit partial frame; required metadata for this frame was not present. \
@@ -200,25 +203,32 @@ impl Frame {
             counter!(OUTGOING_DROPPED_FRAMES_NO_METADATA).increment(1);
             counter!(OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA)
                 .increment(self.events.len() as u64);
-            return;
+            return vec![];
         }
 
         if config.sort_events_by_tof {
             self.sort_by_tof();
         }
 
-        self.emit_pu00_message(fbb, *message_id, config, &mut sink);
-        *message_id += 1;
+        FBB.with(|fbb| {
+            let mut fbb = fbb.borrow_mut();
 
-        self.events
-            .chunks(config.max_events_per_message)
-            .for_each(|chunk| {
-                self.emit_ev44_message(fbb, *message_id, chunk, config, &mut sink);
-                *message_id += 1;
-            });
+            let mut msgs = Vec::with_capacity(1 + self.events.len().div_ceil(config.max_events_per_message));
 
-        counter!(OUTGOING_FRAMES).increment(1);
-        counter!(OUTGOING_NEUTRON_EVENTS).increment(self.events.len() as u64);
+            msgs.push(self.to_pu00_message(&mut fbb, *message_id, config));
+
+            msgs.extend(self.events.chunks(config.max_events_per_message)
+                .map(|chunk| {
+                    let m = self.to_ev44_message(&mut fbb, *message_id, chunk, config);
+                    *message_id += 1;
+                    m
+                }));
+
+            counter!(OUTGOING_FRAMES).increment(1);
+            counter!(OUTGOING_NEUTRON_EVENTS).increment(self.events.len() as u64);
+
+            msgs
+        })
     }
 }
 
@@ -230,8 +240,6 @@ mod tests {
 
     #[test]
     fn test_emit_messages() {
-        let mut captured_messages = vec![];
-
         let mut frame = Frame {
             events: vec![
                 Event {
@@ -254,26 +262,23 @@ mod tests {
             ttl_deadline: Instant::now(),
         };
 
-        let mut fbb = FlatBufferBuilder::new();
-        frame.emit_messages(
-            &mut fbb,
+        let captured_messages = frame.messages(
             &mut 0,
             &AggregatorConfig {
                 max_events_per_message: 2,
                 ..Default::default()
             },
-            |_, e| captured_messages.push(e.to_vec()),
         );
 
         assert_eq!(captured_messages.len(), 3);
 
-        let pu00 = root_as_pu_00_message(&captured_messages[0]).unwrap();
+        let pu00 = root_as_pu_00_message(&captured_messages[0].content()).unwrap();
         assert_eq!(pu00.vetos(), Some(0b11010011));
         assert!((pu00.proton_charge().unwrap() - 123.456).abs() < 0.001);
         assert_eq!(pu00.period_number(), Some(5));
 
         // First ev44 containing two events
-        let event1 = root_as_event_44_message(&captured_messages[1]).unwrap();
+        let event1 = root_as_event_44_message(&captured_messages[1].content()).unwrap();
         assert_eq!(
             event1.pixel_id().unwrap().iter().collect::<Vec<_>>(),
             vec![0, 2]
@@ -285,7 +290,7 @@ mod tests {
         assert_eq!(event1.reference_time().iter().next(), Some(123456));
 
         // Second ev44 containing one event
-        let event2 = root_as_event_44_message(&captured_messages[2]).unwrap();
+        let event2 = root_as_event_44_message(&captured_messages[2].content()).unwrap();
         assert_eq!(
             event2.pixel_id().unwrap().iter().collect::<Vec<_>>(),
             vec![5]

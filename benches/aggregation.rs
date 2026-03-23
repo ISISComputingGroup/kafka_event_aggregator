@@ -50,8 +50,6 @@ fn benchmark_emit_events(c: &mut Criterion) {
             BenchmarkId::from_parameter(events_per_frame),
             &events_per_frame,
             |b, events_per_frame| {
-                let mut fbb = FlatBufferBuilder::new();
-
                 b.iter_batched_ref(
                     || {
                         let mut frame = Frame::new(0, &config);
@@ -61,7 +59,7 @@ fn benchmark_emit_events(c: &mut Criterion) {
                         frame
                     },
                     |frame| {
-                        frame.emit_messages(&mut fbb, &mut 0, &config, |timestamp, msg| {
+                        frame.emit_messages(&mut 0, &config, |timestamp, msg| {
                             black_box((timestamp, msg));
                         });
                     },

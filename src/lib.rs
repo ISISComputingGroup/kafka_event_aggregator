@@ -53,4 +53,5 @@ pub mod config;
 pub mod frame;
 pub mod kafka;
 pub mod metrics;
+pub mod outgoing_message;
 pub mod queue;

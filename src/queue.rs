@@ -46,7 +46,7 @@ impl<'a> FrameQueue<'a> {
         self.frames.is_empty()
     }
 
-    pub fn send_expired_frames<F>(&mut self, fbb: &mut FlatBufferBuilder<'_>, mut sink: F)
+    pub fn send_expired_frames<F>(&mut self, mut sink: F)
     where
         F: FnMut(i64, &[u8]),
     {
@@ -66,7 +66,7 @@ impl<'a> FrameQueue<'a> {
                 completed_frame.reference_time(),
                 completed_frame.num_events(),
             );
-            completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
+            completed_frame.messages(&mut self.message_id, self.config);
         }
     }
 
