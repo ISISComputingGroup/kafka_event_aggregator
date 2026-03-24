@@ -51,8 +51,8 @@ fn latest_message_on_one_partition(
     // Note: must call poll repeatedly with short timeouts, rather than calling poll
     // once with a long timeout here, to avoid race condition in kafka with polling
     // immediately after assignment.
-    while attempts < 100 {
-        if let Some(msg) = consumer.poll(Duration::from_millis(50)) {
+    while attempts < config.read_last_message_timeout_ms {
+        if let Some(msg) = consumer.poll(Duration::from_millis(1)) {
             return match msg {
                 Ok(message) => {
                     if let Some(payload) = message.payload() {

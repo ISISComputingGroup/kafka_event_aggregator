@@ -9,6 +9,7 @@ use kafka_event_aggregator::queue::FrameQueue;
 use rand::prelude::*;
 use rand::rngs::ChaCha8Rng;
 use std::hint::black_box;
+use std::time::Duration;
 
 fn make_config() -> AggregatorConfig {
     AggregatorConfig {
@@ -33,15 +34,15 @@ fn make_fake_events(num: usize) -> Vec<Event> {
 const BYTES_PER_EVENT: usize = 8;
 
 fn benchmark_emit_events(c: &mut Criterion) {
-    const NUM_FRAMES: u64 = 5;  // Frame queue poll time of 100ms, 50Hz frames
+    const NUM_FRAMES: u64 = 10; // Frame queue poll time of 200ms, 50Hz frames
     let config = make_config();
 
     let mut group = c.benchmark_group("emit_events");
     for events_per_frame in [
-        1000,      // Approx 3 mbps at 50Hz
-        10_000,    // Approx 30 mbps at 50Hz
-        100_000,   // Approx 300 mbps at 50Hz
-        1_000_000, // Approx 3 gbps at 50Hz
+        1000,       // Approx 3 mbps at 50Hz
+        10_000,     // Approx 30 mbps at 50Hz
+        100_000,    // Approx 300 mbps at 50Hz
+        1_000_000,  // Approx 3 gbps at 50Hz
         10_000_000, // Approx 30 gbps at 50Hz
     ]
     .into_iter()
@@ -123,9 +124,9 @@ fn benchmark_process_raw_messages(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    benchmark_emit_events,
-    benchmark_process_raw_messages
-);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().measurement_time(Duration::from_secs(10));
+    targets = benchmark_emit_events, benchmark_process_raw_messages
+}
 criterion_main!(benches);

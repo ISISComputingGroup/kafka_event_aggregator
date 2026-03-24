@@ -133,13 +133,7 @@ impl Frame {
         self.events.par_sort_unstable_by_key(|e| e.time_of_flight);
     }
 
-    fn to_pu00_message(
-        &self,
-        message_id: i64,
-        config: &AggregatorConfig,
-    ) -> OutgoingMessage {
-
-
+    fn to_pu00_message(&self, message_id: i64, config: &AggregatorConfig) -> OutgoingMessage {
         FBB.with(|fbb| {
             let mut fbb = fbb.borrow_mut();
             fbb.reset();
@@ -168,12 +162,13 @@ impl Frame {
         events: &[Event],
         config: &AggregatorConfig,
     ) -> OutgoingMessage {
-
         FBB.with(|fbb| {
             let mut fbb = fbb.borrow_mut();
             fbb.reset();
-            let tofs = fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
-            let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
+            let tofs =
+                fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
+            let pixel_ids =
+                fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
 
             let args = Event44MessageArgs {
                 source_name: Some(fbb.create_string(&config.source_name)),
@@ -212,7 +207,7 @@ impl Frame {
         }
 
         if config.sort_events_by_tof {
-            self.sort_by_tof();
+            // self.sort_by_tof();
         }
 
         let num_messages = 1 + self.events.len().div_ceil(config.max_events_per_message);
@@ -227,9 +222,7 @@ impl Frame {
             self.events
                 .chunks(config.max_events_per_message)
                 .zip(base_id + 1..)
-                .par_bridge()
                 .map(|(chunk, id)| self.to_ev44_message(id, chunk, config))
-                .collect::<Vec<_>>(),
         );
 
         counter!(OUTGOING_FRAMES).increment(1);

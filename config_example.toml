@@ -31,6 +31,10 @@ metrics_bind_addr = "127.0.0.1:8484"
 # Whether to sort outgoing events by time-of-flight.
 sort_events_by_tof = true
 
+# Timeout (milliseconds) for reading the last message from a Kafka partition
+# (at startup, to get the latest message ID)
+read_last_message_timeout_ms = 5000
+
 # Kafka configuration parameters (producer)
 [kafka_producer]
 "bootstrap.servers" = "livedata.isis.cclrc.ac.uk:31092"
