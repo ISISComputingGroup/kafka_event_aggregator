@@ -39,6 +39,10 @@ read_last_message_timeout_ms = 5000
 [kafka_producer]
 "bootstrap.servers" = "livedata.isis.cclrc.ac.uk:31092"
 "enable.idempotence" = "true"
+"queue.buffering.max.messages" = "2147483647"
+"queue.buffering.max.kbytes" = "2147483647"
+"queue.buffering.max.ms" = "50"
+"batch.size" = "2147483647"
 
 # Kafka configuration parameters (consumer)
 [kafka_consumer]

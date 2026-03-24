@@ -207,7 +207,7 @@ impl Frame {
         }
 
         if config.sort_events_by_tof {
-            // self.sort_by_tof();
+            self.sort_by_tof();
         }
 
         let num_messages = 1 + self.events.len().div_ceil(config.max_events_per_message);
@@ -222,7 +222,7 @@ impl Frame {
             self.events
                 .chunks(config.max_events_per_message)
                 .zip(base_id + 1..)
-                .map(|(chunk, id)| self.to_ev44_message(id, chunk, config))
+                .map(|(chunk, id)| self.to_ev44_message(id, chunk, config)),
         );
 
         counter!(OUTGOING_FRAMES).increment(1);

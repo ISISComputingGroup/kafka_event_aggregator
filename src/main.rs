@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             },
             _ = frame_queue_poll_interval.tick() => {
-                frame_queue.messages_for_expired_frames().iter().for_each(|msg| {
+                frame_queue.messages_for_expired_frames().into_iter().for_each(|msg| {
                     let result = producer.send(
                         BaseRecord::<[u8], [u8]>::to(&config.output_topic)
                             .payload(msg.content())
