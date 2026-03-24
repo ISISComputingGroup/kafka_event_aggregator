@@ -83,7 +83,7 @@ impl<'a> FrameQueue<'a> {
         completed_frames
             .par_iter_mut()
             .map(|frame| frame.messages(self.message_id.clone(), self.config))
-            .flatten()
+            .flatten_iter()
             .collect()
     }
 

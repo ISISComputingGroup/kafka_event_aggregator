@@ -135,55 +135,62 @@ impl Frame {
 
     fn to_pu00_message(
         &self,
-        fbb: &'_ mut FlatBufferBuilder<'_>,
         message_id: i64,
         config: &AggregatorConfig,
     ) -> OutgoingMessage {
-        fbb.reset();
-        let args = Pu00MessageArgs {
-            source_name: Some(fbb.create_string(&config.source_name)),
-            message_id,
-            proton_charge: self.protons_per_pulse,
-            vetos: Some(self.vetos),
-            period_number: self.period,
-            reference_time: self.reference_time,
-        };
 
-        let pu00 = Pu00Message::create(fbb, &args);
-        finish_pu_00_message_buffer(fbb, pu00);
 
-        counter!(OUTGOING_METADATA_MESSAGES).increment(1);
+        FBB.with(|fbb| {
+            let mut fbb = fbb.borrow_mut();
+            fbb.reset();
+            let args = Pu00MessageArgs {
+                source_name: Some(fbb.create_string(&config.source_name)),
+                message_id,
+                proton_charge: self.protons_per_pulse,
+                vetos: Some(self.vetos),
+                period_number: self.period,
+                reference_time: self.reference_time,
+            };
 
-        OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
+            let pu00 = Pu00Message::create(&mut fbb, &args);
+            finish_pu_00_message_buffer(&mut fbb, pu00);
+
+            counter!(OUTGOING_METADATA_MESSAGES).increment(1);
+
+            OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
+        })
     }
 
     /// Emit an ev44 message for the provided events to the specified sink.
     fn to_ev44_message(
         &self,
-        fbb: &'_ mut FlatBufferBuilder<'_>,
         message_id: i64,
         events: &[Event],
         config: &AggregatorConfig,
     ) -> OutgoingMessage {
-        fbb.reset();
-        let tofs = fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
-        let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
 
-        let args = Event44MessageArgs {
-            source_name: Some(fbb.create_string(&config.source_name)),
-            message_id,
-            reference_time: Some(fbb.create_vector(&[self.reference_time])),
-            reference_time_index: Some(fbb.create_vector(&[0])),
-            time_of_flight: Some(tofs),
-            pixel_id: Some(pixel_ids),
-        };
+        FBB.with(|fbb| {
+            let mut fbb = fbb.borrow_mut();
+            fbb.reset();
+            let tofs = fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
+            let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
 
-        let ev44 = Event44Message::create(fbb, &args);
-        finish_event_44_message_buffer(fbb, ev44);
+            let args = Event44MessageArgs {
+                source_name: Some(fbb.create_string(&config.source_name)),
+                message_id,
+                reference_time: Some(fbb.create_vector(&[self.reference_time])),
+                reference_time_index: Some(fbb.create_vector(&[0])),
+                time_of_flight: Some(tofs),
+                pixel_id: Some(pixel_ids),
+            };
 
-        counter!(OUTGOING_EVENT_MESSAGES).increment(1);
+            let ev44 = Event44Message::create(&mut fbb, &args);
+            finish_event_44_message_buffer(&mut fbb, ev44);
 
-        OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
+            counter!(OUTGOING_EVENT_MESSAGES).increment(1);
+
+            OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
+        })
     }
 
     /// Emit pu00 and ev44 messages representing this frame to the specified sink.
@@ -212,25 +219,23 @@ impl Frame {
 
         let base_id = message_id.fetch_add(num_messages as i64, Ordering::Relaxed);
 
-        FBB.with(|fbb| {
-            let mut fbb = fbb.borrow_mut();
+        let mut msgs = Vec::with_capacity(num_messages);
 
-            let mut msgs = Vec::with_capacity(num_messages);
+        msgs.push(self.to_pu00_message(base_id, config));
 
-            msgs.push(self.to_pu00_message(&mut fbb, base_id, config));
+        msgs.extend(
+            self.events
+                .chunks(config.max_events_per_message)
+                .zip(base_id + 1..)
+                .par_bridge()
+                .map(|(chunk, id)| self.to_ev44_message(id, chunk, config))
+                .collect::<Vec<_>>(),
+        );
 
-            msgs.extend(
-                self.events
-                    .chunks(config.max_events_per_message)
-                    .zip(base_id + 1..)
-                    .map(|(chunk, id)| self.to_ev44_message(&mut fbb, id, chunk, config)),
-            );
+        counter!(OUTGOING_FRAMES).increment(1);
+        counter!(OUTGOING_NEUTRON_EVENTS).increment(self.events.len() as u64);
 
-            counter!(OUTGOING_FRAMES).increment(1);
-            counter!(OUTGOING_NEUTRON_EVENTS).increment(self.events.len() as u64);
-
-            msgs
-        })
+        msgs
     }
 }
 

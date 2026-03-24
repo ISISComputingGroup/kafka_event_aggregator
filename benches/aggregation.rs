@@ -42,6 +42,7 @@ fn benchmark_emit_events(c: &mut Criterion) {
         10_000,    // Approx 30 mbps at 50Hz
         100_000,   // Approx 300 mbps at 50Hz
         1_000_000, // Approx 3 gbps at 50Hz
+        10_000_000, // Approx 30 gbps at 50Hz
     ]
     .into_iter()
     {
