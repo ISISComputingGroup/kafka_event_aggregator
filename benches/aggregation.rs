@@ -4,72 +4,114 @@ use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
 };
 use kafka_event_aggregator::config::AggregatorConfig;
-use kafka_event_aggregator::frame::{Event, Frame};
 use kafka_event_aggregator::queue::FrameQueue;
 use rand::prelude::*;
 use rand::rngs::ChaCha8Rng;
 use std::hint::black_box;
+use std::iter;
 use std::time::Duration;
+use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{finish_pu_00_message_buffer, Pu00Message, Pu00MessageArgs};
 
 fn make_config() -> AggregatorConfig {
     AggregatorConfig {
         max_events_per_message: 100_000,
         sort_events_by_tof: true,
         expiry_offset_ms: 0,
+        reference_time_tolerance_ns: 0,
         ..Default::default()
     }
 }
 
-fn make_fake_events(num: usize) -> Vec<Event> {
-    let mut rng = ChaCha8Rng::seed_from_u64(0);
-    let mut events = Vec::with_capacity(num);
-    for _ in 0..num {
-        let tof = rng.random();
-        let pixel = rng.random();
-        events.push(Event::new(tof, pixel))
-    }
-    events
+fn make_fake_flatbuffers_encoded_events(rng: &mut ChaCha8Rng, reference_time: i64, num_messages: usize, events_per_message: usize) -> Vec<Vec<u8>> {
+    (0..num_messages)
+        .map(|_| {
+            let mut pixel_ids = Vec::with_capacity(events_per_message);
+            let mut tofs = Vec::with_capacity(events_per_message);
+
+            for _ in 0..events_per_message {
+                pixel_ids.push(rng.random_range(0..65536));
+                tofs.push(rng.random_range(0..100_000_000));
+            }
+
+            let mut fbb = FlatBufferBuilder::new();
+            let args = Event44MessageArgs {
+                source_name: Some(fbb.create_string("source_name")),
+                message_id: 0,
+                reference_time: Some(fbb.create_vector(&[reference_time])),
+                reference_time_index: Some(fbb.create_vector(&[0])),
+                time_of_flight: Some(fbb.create_vector(&tofs)),
+                pixel_id: Some(fbb.create_vector(&pixel_ids)),
+            };
+
+            let ev44 = Event44Message::create(&mut fbb, &args);
+            finish_event_44_message_buffer(&mut fbb, ev44);
+            fbb.finished_data().to_owned()
+        })
+        .chain(iter::once_with(|| {
+            let mut fbb = FlatBufferBuilder::new();
+            let args = Pu00MessageArgs {
+                source_name: Some(fbb.create_string("source_name")),
+                message_id: 0,
+                reference_time,
+                proton_charge: Some(1.2345),
+                vetos: Some(0b11010011),
+                period_number: Some(1),
+            };
+            let pu00 = Pu00Message::create(&mut fbb, &args);
+            finish_pu_00_message_buffer(&mut fbb, pu00);
+            fbb.finished_data().to_owned()
+        }))
+        .collect()
 }
 
 const BYTES_PER_EVENT: usize = 8;
 
-fn benchmark_emit_events(c: &mut Criterion) {
-    const NUM_FRAMES: u64 = 10; // Frame queue poll time of 200ms, 50Hz frames
+fn benchmark_full_aggregation(c: &mut Criterion) {
+
+    const INPUT_MESSAGES_PER_FRAME: usize = 100;
+    const NUM_FRAMES: usize = 10;
+
     let config = make_config();
 
-    let mut group = c.benchmark_group("emit_events");
-    for events_per_frame in [
-        1000,       // Approx 3 mbps at 50Hz
-        10_000,     // Approx 30 mbps at 50Hz
-        100_000,    // Approx 300 mbps at 50Hz
-        1_000_000,  // Approx 3 gbps at 50Hz
-        10_000_000, // Approx 30 gbps at 50Hz
+    let mut group = c.benchmark_group("full_aggregation");
+
+    let mut rng = ChaCha8Rng::seed_from_u64(0);
+
+    for events_per_input_msg in [
+        10,
+        100,
+        1000,
+        10_000,
     ]
-    .into_iter()
+        .into_iter()
     {
         group.throughput(Throughput::ElementsAndBytes {
-            elements: events_per_frame as u64 * NUM_FRAMES,
-            bytes: (events_per_frame as u64 * BYTES_PER_EVENT as u64 * NUM_FRAMES),
+            elements: (NUM_FRAMES * INPUT_MESSAGES_PER_FRAME * events_per_input_msg) as u64,
+            bytes: (NUM_FRAMES * INPUT_MESSAGES_PER_FRAME * events_per_input_msg * BYTES_PER_EVENT) as u64,
         });
 
         group.bench_with_input(
-            BenchmarkId::from_parameter(events_per_frame),
-            &events_per_frame,
-            |b, events_per_frame| {
+            BenchmarkId::from_parameter(format!("{} events per input message", events_per_input_msg)),
+            &events_per_input_msg,
+            |b, &events_per_input_msg| {
                 b.iter_batched_ref(
                     || {
-                        let mut frame_queue = FrameQueue::new(&config, 0);
-                        for _ in 0..NUM_FRAMES {
-                            let mut frame = Frame::new(0, &config);
-                            frame.set_period(1);
-                            frame.set_protons_per_pulse(1.0);
-                            frame.append_events(make_fake_events(*events_per_frame).into_iter());
-                            frame_queue.push_frame(frame)
-                        }
-                        frame_queue
+                        let messages = (0..NUM_FRAMES)
+                            .map(|t| make_fake_flatbuffers_encoded_events(&mut rng, t as i64 * 1_000_000_000, INPUT_MESSAGES_PER_FRAME, events_per_input_msg))
+                            .flatten()
+                            .collect::<Vec<_>>();
+
+                        let frame_queue = FrameQueue::new(&config, 0);
+
+                        (messages, frame_queue)
                     },
-                    |frame_queue: &mut FrameQueue<'_>| {
-                        black_box(frame_queue.messages_for_expired_frames());
+                    |(messages, frame_queue)| {
+                        for msg in messages {
+                            frame_queue.process_raw_message(msg);
+                        }
+                        for msg in frame_queue.messages_for_expired_frames() {
+                            black_box((msg.timestamp(), msg.content()));
+                        }
                     },
                     BatchSize::LargeInput,
                 );
@@ -78,55 +120,9 @@ fn benchmark_emit_events(c: &mut Criterion) {
     }
 }
 
-fn benchmark_process_raw_messages(c: &mut Criterion) {
-    let config = make_config();
-
-    const NUM_FRAMES: i64 = 1000;
-    const MESSAGES_PER_FRAME: usize = 100;
-    const EVENTS_PER_MESSAGE: usize = 500;
-
-    let messages = (0..NUM_FRAMES) // 1000 different reference times
-        .flat_map(|n| [n; MESSAGES_PER_FRAME]) // each reference time appears 100 times
-        .map(|t| {
-            let mut fbb = FlatBufferBuilder::new();
-            let args = Event44MessageArgs {
-                source_name: Some(fbb.create_string("source_name")),
-                message_id: 0,
-                reference_time: Some(fbb.create_vector(&[t])),
-                reference_time_index: Some(fbb.create_vector(&[0])),
-                time_of_flight: Some(fbb.create_vector(&[0; EVENTS_PER_MESSAGE])),
-                pixel_id: Some(fbb.create_vector(&[0; EVENTS_PER_MESSAGE])),
-            };
-
-            let ev44 = Event44Message::create(&mut fbb, &args);
-            finish_event_44_message_buffer(&mut fbb, ev44);
-            fbb.finished_data().to_owned()
-        })
-        .collect::<Vec<_>>();
-
-    let mut group = c.benchmark_group("process_raw_message");
-    group.throughput(Throughput::Bytes(
-        messages.iter().map(|m| m.len() as u64).sum(),
-    ));
-
-    group.bench_function("process_raw_message", |b| {
-        b.iter_batched_ref(
-            || FrameQueue::new(&config, 0),
-            |queue: &mut FrameQueue| {
-                messages
-                    .iter()
-                    .for_each(|msg| queue.process_raw_message(msg));
-
-                assert_eq!(queue.len(), NUM_FRAMES as usize);
-            },
-            BatchSize::LargeInput,
-        )
-    });
-}
-
 criterion_group! {
     name = benches;
     config = Criterion::default().measurement_time(Duration::from_secs(10));
-    targets = benchmark_emit_events, benchmark_process_raw_messages
+    targets = benchmark_full_aggregation
 }
 criterion_main!(benches);

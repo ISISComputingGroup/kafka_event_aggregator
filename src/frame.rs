@@ -15,7 +15,6 @@ use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{
 };
 use log::warn;
 use metrics::counter;
-use rayon::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -130,7 +129,7 @@ impl Frame {
 
     /// Sort the events in this frame by time-of-flight
     fn sort_by_tof(&mut self) {
-        self.events.par_sort_unstable_by_key(|e| e.time_of_flight);
+        self.events.sort_unstable_by_key(|e| e.time_of_flight);
     }
 
     fn to_pu00_message(&self, message_id: i64, config: &AggregatorConfig) -> OutgoingMessage {
@@ -194,7 +193,7 @@ impl Frame {
         message_id: Arc<AtomicI64>,
         config: &AggregatorConfig,
     ) -> Vec<OutgoingMessage> {
-        if false && (self.protons_per_pulse.is_none() || self.period.is_none()) {
+        if self.protons_per_pulse.is_none() || self.period.is_none() {
             warn!(
                 "Failed to emit partial frame; required metadata for this frame was not present. \
             This can occur if an event message and it's corresponding metadata are not \
