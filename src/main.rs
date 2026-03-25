@@ -81,7 +81,6 @@ async fn main() -> anyhow::Result<()> {
                             counter!(OUTGOING_KAFKA_ERRORS).increment(1);
                         }
                 });
-
                 gauge!(QUEUE_FRAMES).set(frame_queue.len() as f64);
             },
             Some(msg) = stream.next() => {

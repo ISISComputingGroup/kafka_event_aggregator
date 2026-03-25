@@ -3,6 +3,9 @@ use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
 };
+use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{
+    Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer,
+};
 use kafka_event_aggregator::config::AggregatorConfig;
 use kafka_event_aggregator::queue::FrameQueue;
 use rand::prelude::*;
@@ -10,7 +13,6 @@ use rand::rngs::ChaCha8Rng;
 use std::hint::black_box;
 use std::iter;
 use std::time::Duration;
-use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{finish_pu_00_message_buffer, Pu00Message, Pu00MessageArgs};
 
 fn make_config() -> AggregatorConfig {
     AggregatorConfig {
@@ -22,7 +24,12 @@ fn make_config() -> AggregatorConfig {
     }
 }
 
-fn make_fake_flatbuffers_encoded_events(rng: &mut ChaCha8Rng, reference_time: i64, num_messages: usize, events_per_message: usize) -> Vec<Vec<u8>> {
+fn make_fake_flatbuffers_encoded_events(
+    rng: &mut ChaCha8Rng,
+    reference_time: i64,
+    num_messages: usize,
+    events_per_message: usize,
+) -> Vec<Vec<u8>> {
     (0..num_messages)
         .map(|_| {
             let mut pixel_ids = Vec::with_capacity(events_per_message);
@@ -67,7 +74,6 @@ fn make_fake_flatbuffers_encoded_events(rng: &mut ChaCha8Rng, reference_time: i6
 const BYTES_PER_EVENT: usize = 8;
 
 fn benchmark_full_aggregation(c: &mut Criterion) {
-
     const INPUT_MESSAGES_PER_FRAME: usize = 100;
     const NUM_FRAMES: usize = 10;
 
@@ -77,27 +83,31 @@ fn benchmark_full_aggregation(c: &mut Criterion) {
 
     let mut rng = ChaCha8Rng::seed_from_u64(0);
 
-    for events_per_input_msg in [
-        10,
-        100,
-        1000,
-        10_000,
-    ]
-        .into_iter()
-    {
+    for events_per_input_msg in [10, 100, 1000, 10_000].into_iter() {
         group.throughput(Throughput::ElementsAndBytes {
             elements: (NUM_FRAMES * INPUT_MESSAGES_PER_FRAME * events_per_input_msg) as u64,
-            bytes: (NUM_FRAMES * INPUT_MESSAGES_PER_FRAME * events_per_input_msg * BYTES_PER_EVENT) as u64,
+            bytes: (NUM_FRAMES * INPUT_MESSAGES_PER_FRAME * events_per_input_msg * BYTES_PER_EVENT)
+                as u64,
         });
 
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("{} events per input message", events_per_input_msg)),
+            BenchmarkId::from_parameter(format!(
+                "{} events per input message",
+                events_per_input_msg
+            )),
             &events_per_input_msg,
             |b, &events_per_input_msg| {
                 b.iter_batched_ref(
                     || {
                         let messages = (0..NUM_FRAMES)
-                            .map(|t| make_fake_flatbuffers_encoded_events(&mut rng, t as i64 * 1_000_000_000, INPUT_MESSAGES_PER_FRAME, events_per_input_msg))
+                            .map(|t| {
+                                make_fake_flatbuffers_encoded_events(
+                                    &mut rng,
+                                    t as i64 * 1_000_000_000,
+                                    INPUT_MESSAGES_PER_FRAME,
+                                    events_per_input_msg,
+                                )
+                            })
                             .flatten()
                             .collect::<Vec<_>>();
 

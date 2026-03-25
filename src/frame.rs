@@ -19,6 +19,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
+use thread_local::ThreadLocal;
 
 /// Representation of a single neutron event
 #[derive(Debug, Copy, Clone)]
@@ -37,6 +38,8 @@ impl Event {
         }
     }
 }
+
+static TLS: ThreadLocal<RefCell<FlatBufferBuilder>> = ThreadLocal::new();
 
 /// Data corresponding to a single neutron frame
 #[derive(Debug)]
@@ -122,8 +125,7 @@ impl Frame {
     }
 
     /// Append new events to this frame from an iterator.
-    pub fn append_events(&mut self, events: impl ExactSizeIterator<Item = Event>) {
-        self.events.reserve(events.len());
+    pub fn append_events(&mut self, events: impl Iterator<Item = Event>) {
         self.events.extend(events)
     }
 
@@ -132,59 +134,67 @@ impl Frame {
         self.events.sort_unstable_by_key(|e| e.time_of_flight);
     }
 
-    fn to_pu00_message(&self, message_id: i64, config: &AggregatorConfig) -> OutgoingMessage {
-        FBB.with(|fbb| {
-            let mut fbb = fbb.borrow_mut();
-            fbb.reset();
-            let args = Pu00MessageArgs {
-                source_name: Some(fbb.create_string(&config.source_name)),
-                message_id,
-                proton_charge: self.protons_per_pulse,
-                vetos: Some(self.vetos),
-                period_number: self.period,
-                reference_time: self.reference_time,
-            };
+    fn to_pu00_message(
+        &self,
+        fbb: &mut FlatBufferBuilder,
+        message_id: i64,
+        config: &AggregatorConfig,
+    ) -> OutgoingMessage {
+        fbb.reset();
+        let args = Pu00MessageArgs {
+            source_name: Some(fbb.create_string(&config.source_name)),
+            message_id,
+            proton_charge: self.protons_per_pulse,
+            vetos: Some(self.vetos),
+            period_number: self.period,
+            reference_time: self.reference_time,
+        };
 
-            let pu00 = Pu00Message::create(&mut fbb, &args);
-            finish_pu_00_message_buffer(&mut fbb, pu00);
+        let pu00 = Pu00Message::create(fbb, &args);
+        finish_pu_00_message_buffer(fbb, pu00);
 
-            counter!(OUTGOING_METADATA_MESSAGES).increment(1);
+        counter!(OUTGOING_METADATA_MESSAGES).increment(1);
 
-            OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
-        })
+        OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
     }
 
     /// Emit an ev44 message for the provided events to the specified sink.
     fn to_ev44_message(
         &self,
+        fbb: &mut FlatBufferBuilder<'_>,
         message_id: i64,
         events: &[Event],
         config: &AggregatorConfig,
     ) -> OutgoingMessage {
-        FBB.with(|fbb| {
-            let mut fbb = fbb.borrow_mut();
-            fbb.reset();
-            let tofs =
-                fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
-            let pixel_ids =
-                fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
+        fbb.reset();
 
-            let args = Event44MessageArgs {
-                source_name: Some(fbb.create_string(&config.source_name)),
-                message_id,
-                reference_time: Some(fbb.create_vector(&[self.reference_time])),
-                reference_time_index: Some(fbb.create_vector(&[0])),
-                time_of_flight: Some(tofs),
-                pixel_id: Some(pixel_ids),
-            };
+        fbb.start_vector::<i32>(events.len());
+        events.iter().map(|e| e.time_of_flight).for_each(|t| {
+            fbb.push(t);
+        });
+        let tofs = fbb.end_vector(events.len());
 
-            let ev44 = Event44Message::create(&mut fbb, &args);
-            finish_event_44_message_buffer(&mut fbb, ev44);
+        fbb.start_vector::<i32>(events.len());
+        events.iter().map(|e| e.pixel_id).for_each(|p| {
+            fbb.push(p);
+        });
+        let pixel_ids = fbb.end_vector(events.len());
 
-            counter!(OUTGOING_EVENT_MESSAGES).increment(1);
+        let args = Event44MessageArgs {
+            source_name: Some(fbb.create_string(&config.source_name)),
+            message_id,
+            reference_time: Some(fbb.create_vector(&[self.reference_time])),
+            reference_time_index: Some(fbb.create_vector(&[0])),
+            time_of_flight: Some(tofs),
+            pixel_id: Some(pixel_ids),
+        };
 
-            OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
-        })
+        let ev44 = Event44Message::create(fbb, &args);
+        finish_event_44_message_buffer(fbb, ev44);
+
+        counter!(OUTGOING_EVENT_MESSAGES).increment(1);
+
+        OutgoingMessage::new(self.kafka_timestamp(), fbb.finished_data().to_vec())
     }
 
     /// Emit pu00 and ev44 messages representing this frame to the specified sink.
@@ -193,6 +203,10 @@ impl Frame {
         message_id: Arc<AtomicI64>,
         config: &AggregatorConfig,
     ) -> Vec<OutgoingMessage> {
+        let mut fbb = TLS
+            .get_or(|| RefCell::new(FlatBufferBuilder::new()))
+            .borrow_mut();
+
         if self.protons_per_pulse.is_none() || self.period.is_none() {
             warn!(
                 "Failed to emit partial frame; required metadata for this frame was not present. \
@@ -215,13 +229,13 @@ impl Frame {
 
         let mut msgs = Vec::with_capacity(num_messages);
 
-        msgs.push(self.to_pu00_message(base_id, config));
+        msgs.push(self.to_pu00_message(&mut fbb, base_id, config));
 
         msgs.extend(
             self.events
                 .chunks(config.max_events_per_message)
                 .zip(base_id + 1..)
-                .map(|(chunk, id)| self.to_ev44_message(id, chunk, config)),
+                .map(|(chunk, id)| self.to_ev44_message(&mut fbb, id, chunk, config)),
         );
 
         counter!(OUTGOING_FRAMES).increment(1);
@@ -260,6 +274,9 @@ mod tests {
             reference_time: 123456,
             ttl_deadline: Instant::now(),
         };
+
+        let tls = ThreadLocal::new();
+        tls.get_or(|| RefCell::new(FlatBufferBuilder::new()));
 
         let msg_id = Arc::new(AtomicI64::new(0));
         let captured_messages = frame.messages(
