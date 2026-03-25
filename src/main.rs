@@ -13,6 +13,7 @@ use rdkafka::producer::BaseRecord;
 use std::time::Duration;
 use tokio::select;
 use tokio::signal::ctrl_c;
+use tokio::time::MissedTickBehavior;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -44,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
 
     let mut frame_queue_poll_interval =
         tokio::time::interval(Duration::from_millis(config.frame_queue_poll_interval_ms));
+    frame_queue_poll_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
     let next_message_id = get_most_recent_message_id(&config)
         .map(|n| n + 1)
@@ -61,17 +63,10 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         select! {
-            Some(msg) = stream.next() => {
-                if let Ok(msg) = msg {
-                    if let Some(payload) = msg.payload() {
-                        frame_queue.process_raw_message(payload);
-                    } else {
-                        warn!("Received event without payload; ignoring.");
-                    }
-                } else {
-                    error!("Error reading from stream {:?}", msg);
-                }
-            },
+            _ = ctrl_c() => {
+                info!("Shutting down after ctrl-c");
+                break;
+            }
             _ = frame_queue_poll_interval.tick() => {
                 frame_queue.messages_for_expired_frames().into_iter().for_each(|msg| {
                     let result = producer.send(
@@ -89,10 +84,17 @@ async fn main() -> anyhow::Result<()> {
 
                 gauge!(QUEUE_FRAMES).set(frame_queue.len() as f64);
             },
-            _ = ctrl_c() => {
-                info!("Shutting down after ctrl-c");
-                break;
-            }
+            Some(msg) = stream.next() => {
+                if let Ok(msg) = msg {
+                    if let Some(payload) = msg.payload() {
+                        frame_queue.process_raw_message(payload);
+                    } else {
+                        warn!("Received event without payload; ignoring.");
+                    }
+                } else {
+                    error!("Error reading from stream {:?}", msg);
+                }
+            },
         }
     }
     Ok(())
