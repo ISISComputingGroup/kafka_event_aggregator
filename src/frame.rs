@@ -207,7 +207,7 @@ impl Frame {
             .get_or(|| RefCell::new(FlatBufferBuilder::new()))
             .borrow_mut();
 
-        if self.protons_per_pulse.is_none() || self.period.is_none() {
+        if false && (self.protons_per_pulse.is_none() || self.period.is_none()) {
             warn!(
                 "Failed to emit partial frame; required metadata for this frame was not present. \
             This can occur if an event message and it's corresponding metadata are not \
