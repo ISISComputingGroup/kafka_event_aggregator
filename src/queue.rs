@@ -14,6 +14,7 @@ use isis_streaming_data_types::{DeserializedMessage, deserialize_message, get_sc
 use log::{debug, warn};
 use metrics::counter;
 use std::collections::VecDeque;
+use std::time::Instant;
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
 /// in the rawEvents Kafka consumer (which is also ordered by time-to-live).
@@ -21,7 +22,7 @@ use std::collections::VecDeque;
 pub struct FrameQueue<'a> {
     /// New frames pushed to back of queue, old frames popped from front of queue
     frames: VecDeque<Frame>,
-    /// How long, in ms, to keep frames in the queue before emitting them
+    /// Aggregator configuration
     config: &'a AggregatorConfig,
     /// Message ID
     message_id: i64,
@@ -64,10 +65,12 @@ impl<'a> FrameQueue<'a> {
             completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
         }
 
+        let now = Instant::now();
+
         while self
             .frames
             .front()
-            .map(|f| f.is_ttl_expired())
+            .map(|f| f.is_ttl_expired(&now))
             .unwrap_or(false)
         {
             let mut completed_frame = self
@@ -93,7 +96,7 @@ impl<'a> FrameQueue<'a> {
     /// is immediately applied to the new frame. The new frame's expiry time will be
     /// an offset from the arrival time of the first message which causes the frame to
     /// be created.
-    fn apply_to_frame<F>(&'_ mut self, reference_time: i64, f: F)
+    fn apply_to_frame<F>(&mut self, reference_time: i64, f: F)
     where
         F: FnOnce(&mut Frame),
     {

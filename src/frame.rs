@@ -98,8 +98,8 @@ impl Frame {
     }
 
     /// Whether this frame's time-to-live has expired.
-    pub fn is_ttl_expired(&self) -> bool {
-        Instant::now() >= self.ttl_deadline
+    pub fn is_ttl_expired(&self, now: &Instant) -> bool {
+        now >= &self.ttl_deadline
     }
 
     pub fn add_vetos(&mut self, vetos: u32) {
@@ -318,7 +318,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(frame1.is_ttl_expired());
+        assert!(frame1.is_ttl_expired(&Instant::now()));
 
         let frame2 = Frame::new(
             123_456_789_000_000,
@@ -328,6 +328,6 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(!frame2.is_ttl_expired());
+        assert!(!frame2.is_ttl_expired(&Instant::now()));
     }
 }
