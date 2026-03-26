@@ -10,14 +10,14 @@ use rdkafka::producer::{DefaultProducerContext, ThreadedProducer};
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use std::time::Duration;
 
-pub fn make_consumer(config: &AggregatorConfig) -> Result<BaseConsumer<DefaultConsumerContext>> {
+pub fn make_consumer(config: &AggregatorConfig) -> Result<StreamConsumer<DefaultConsumerContext>> {
     let mut client_config = ClientConfig::new();
 
     for (k, v) in &config.kafka_consumer {
         client_config.set(k, v);
     }
 
-    let consumer: BaseConsumer<DefaultConsumerContext> = client_config.create()?;
+    let consumer: StreamConsumer<DefaultConsumerContext> = client_config.create()?;
 
     consumer
         .subscribe(&[&config.input_topic])
