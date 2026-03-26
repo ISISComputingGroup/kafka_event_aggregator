@@ -84,6 +84,8 @@ fn benchmark_full_aggregation(c: &mut Criterion) {
 
     let mut rng = ChaCha8Rng::seed_from_u64(0);
 
+    let mut fbb = FlatBufferBuilder::new();
+
     for events_per_input_msg in [10, 100, 1000, 10_000].into_iter() {
         group.throughput(Throughput::ElementsAndBytes {
             elements: (NUM_FRAMES * INPUT_MESSAGES_PER_FRAME * events_per_input_msg) as u64,
@@ -114,16 +116,16 @@ fn benchmark_full_aggregation(c: &mut Criterion) {
 
                         let frame_queue = FrameQueue::new(&config, 0);
 
-                        let fbb = FlatBufferBuilder::new();
-
-                        (messages, frame_queue, fbb)
+                        (messages, frame_queue)
                     },
-                    |(messages, frame_queue, fbb)| {
+                    |(messages, frame_queue)| {
                         for msg in messages {
                             frame_queue.process_raw_message(msg);
                         }
-                        frame_queue.send_expired_frames(fbb, |timestamp, msg| {
-                            black_box((timestamp, msg));
+                        frame_queue.send_expired_frames(&mut fbb, |timestamp, msg| {
+                            // Use to_vec() to simulate the copy that librdkafka does
+                            // (rdkafka uses RD_KAFKA_MSG_F_COPY)
+                            black_box((timestamp, msg.to_vec()));
                         })
                     },
                     BatchSize::LargeInput,

@@ -7,11 +7,11 @@ use kafka_event_aggregator::metrics::{
     OUTGOING_KAFKA_ERRORS, OUTGOING_MESSAGE_SIZE, QUEUE_FRAMES, initialize_metrics,
 };
 use kafka_event_aggregator::queue::FrameQueue;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use metrics::{counter, gauge};
 use rdkafka::Message;
 use rdkafka::producer::BaseRecord;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::select;
 use tokio::signal::ctrl_c;
 
@@ -67,7 +67,9 @@ async fn main() -> anyhow::Result<()> {
             Some(msg) = stream.next() => {
                 if let Ok(msg) = msg {
                     if let Some(payload) = msg.payload() {
+                        let start = Instant::now();
                         frame_queue.process_raw_message(payload);
+                        debug!("Processing raw msg ({} bytes) took {} us", payload.len(), start.elapsed().as_micros());
                     } else {
                         warn!("Received event without payload; ignoring.");
                     }
@@ -76,6 +78,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             },
             _ = frame_queue_poll_interval.tick() => {
+                let start = Instant::now();
+                let len_start = frame_queue.len();
                 frame_queue.send_expired_frames(&mut fbb, |timestamp, msg| {
                     let result = producer.send(
                         BaseRecord::<[u8], [u8]>::to(&config.output_topic)
@@ -89,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
                         counter!(OUTGOING_KAFKA_ERRORS).increment(1);
                     }
                 });
+                debug!("Sending messages {} -> {} took {} us", len_start, frame_queue.len(), start.elapsed().as_micros());
 
                 gauge!(QUEUE_FRAMES).set(frame_queue.len() as f64);
             },
