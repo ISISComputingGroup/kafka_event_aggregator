@@ -20,6 +20,7 @@ fn make_config() -> AggregatorConfig {
         sort_events_by_tof: true,
         expiry_offset_ms: 0,
         reference_time_tolerance_ns: 0,
+        max_queued_frames: 50,
         ..Default::default()
     }
 }

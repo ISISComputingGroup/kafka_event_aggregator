@@ -22,6 +22,11 @@ reference_time_tolerance_ns = 100
 # Note: this adds to the latency of the `_events` output stream.
 expiry_offset_ms = 500
 
+# Maximum number of queued frames. If more than this many frames are in the queue,
+# the oldest frames will be emitted, even if they have not yet reached
+# expiry_offset_ms.
+max_queued_frames = 50
+
 # Source name in output messages.
 source_name = "kafka-event-aggregator"
 

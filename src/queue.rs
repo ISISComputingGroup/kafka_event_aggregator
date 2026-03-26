@@ -80,6 +80,20 @@ impl<'a> FrameQueue<'a> {
             completed_frames.push(completed_frame);
         }
 
+        while self.frames.len() > self.config.max_queued_frames {
+            let completed_frame = self
+                .frames
+                .pop_front()
+                .expect("unreachable; frames cannot be empty after checking length");
+            trace!(
+                "Sending non-expired frame as more than {} queued frames (reference_time={}, neutron_events={})",
+                self.config.max_queued_frames,
+                completed_frame.reference_time(),
+                completed_frame.num_events(),
+            );
+            completed_frames.push(completed_frame);
+        }
+
         completed_frames
             .par_iter_mut()
             .map(|frame| frame.messages(self.message_id.clone(), self.config))

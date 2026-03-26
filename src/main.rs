@@ -57,16 +57,7 @@ fn main() -> anyhow::Result<()> {
         while let Some(msg) = consumer.poll(Duration::from_millis(1)) {
             if let Ok(msg) = msg {
                 if let Some(payload) = msg.payload() {
-                    // frame_queue.process_raw_message(payload);
-
-                    let result = producer.send(
-                        BaseRecord::<[u8], [u8]>::to(&config.output_topic)
-                            .payload(payload),
-                    );
-
-                    if let Err((e, _)) = result {
-                        warn!("Error sending message to kafka: {:?}", e);
-                    }
+                    frame_queue.process_raw_message(payload);
                 } else {
                     warn!("Received event without payload; ignoring.");
                 }
@@ -80,22 +71,22 @@ fn main() -> anyhow::Result<()> {
         }
 
         if last_emit.elapsed() > Duration::from_millis(100) {
-            // frame_queue
-            //     .messages_for_expired_frames()
-            //     .into_iter()
-            //     .for_each(|msg| {
-            //         let result = producer.send(
-            //             BaseRecord::<[u8], [u8]>::to(&config.output_topic)
-            //                 .payload(msg.content())
-            //                 .timestamp(msg.timestamp()),
-            //         );
-            //         counter!(OUTGOING_MESSAGE_SIZE).increment(msg.len() as u64);
-            //
-            //         if let Err((e, _)) = result {
-            //             warn!("Error sending message to kafka: {:?}", e);
-            //             counter!(OUTGOING_KAFKA_ERRORS).increment(1);
-            //         }
-            //     });
+            frame_queue
+                .messages_for_expired_frames()
+                .into_iter()
+                .for_each(|msg| {
+                    let result = producer.send(
+                        BaseRecord::<[u8], [u8]>::to(&config.output_topic)
+                            .payload(msg.content())
+                            .timestamp(msg.timestamp()),
+                    );
+                    counter!(OUTGOING_MESSAGE_SIZE).increment(msg.len() as u64);
+
+                    if let Err((e, _)) = result {
+                        warn!("Error sending message to kafka: {:?}", e);
+                        counter!(OUTGOING_KAFKA_ERRORS).increment(1);
+                    }
+                });
             last_emit = Instant::now();
         }
     }
