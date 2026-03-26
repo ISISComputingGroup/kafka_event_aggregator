@@ -10,10 +10,10 @@ use crate::metrics::{
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::Event44Message;
 use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::Pu00Message;
-use log::{trace, warn};
+use isis_streaming_data_types::{DeserializedMessage, deserialize_message, get_schema_id};
+use log::{debug, warn};
 use metrics::counter;
 use std::collections::VecDeque;
-use isis_streaming_data_types::{deserialize_message, DeserializedMessage, get_schema_id};
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
 /// in the rawEvents Kafka consumer (which is also ordered by time-to-live).
@@ -50,6 +50,20 @@ impl<'a> FrameQueue<'a> {
     where
         F: FnMut(i64, &[u8]),
     {
+        while self.frames.len() > self.config.max_queued_frames {
+            let mut completed_frame = self
+                .frames
+                .pop_front()
+                .expect("unreachable; frames is empty after checking a frame exists");
+
+            debug!(
+                "Sending frame as queue is too long (reference_time={}, neutron_events={})",
+                completed_frame.reference_time(),
+                completed_frame.num_events(),
+            );
+            completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
+        }
+
         while self
             .frames
             .front()
@@ -61,7 +75,7 @@ impl<'a> FrameQueue<'a> {
                 .pop_front()
                 .expect("unreachable; frames is empty after checking first frame exists");
 
-            trace!(
+            debug!(
                 "Sending expired frame (reference_time={}, neutron_events={})",
                 completed_frame.reference_time(),
                 completed_frame.num_events(),
@@ -79,9 +93,9 @@ impl<'a> FrameQueue<'a> {
     /// is immediately applied to the new frame. The new frame's expiry time will be
     /// an offset from the arrival time of the first message which causes the frame to
     /// be created.
-    fn apply_to_frame<F>(&'_ mut self, reference_time: i64, mut f: F)
+    fn apply_to_frame<F>(&'_ mut self, reference_time: i64, f: F)
     where
-        F: FnMut(&mut Frame),
+        F: FnOnce(&mut Frame),
     {
         let frame = match self
             .frames

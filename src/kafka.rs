@@ -2,13 +2,13 @@
 
 use crate::config::AggregatorConfig;
 use anyhow::{Context, Result, bail};
+use isis_streaming_data_types::{DeserializedMessage, deserialize_message};
 use log::{debug, warn};
 use rdkafka::Offset::Offset;
 use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::producer::{DefaultProducerContext, ThreadedProducer};
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use std::time::Duration;
-use isis_streaming_data_types::{deserialize_message, DeserializedMessage};
 
 pub fn make_consumer(config: &AggregatorConfig) -> Result<StreamConsumer<DefaultConsumerContext>> {
     let mut client_config = ClientConfig::new();
@@ -31,8 +31,11 @@ fn latest_message_on_one_partition(
     consumer: &BaseConsumer<DefaultConsumerContext>,
     partition: i32,
 ) -> Result<i64> {
-    let (low, high) =
-        consumer.fetch_watermarks(&config.output_topic, partition, Duration::from_millis(1000))?;
+    let (low, high) = consumer.fetch_watermarks(
+        &config.output_topic,
+        partition,
+        Duration::from_millis(config.read_last_message_timeout_ms),
+    )?;
 
     if high <= low {
         bail!(
@@ -51,8 +54,8 @@ fn latest_message_on_one_partition(
     // Note: must call poll repeatedly with short timeouts, rather than calling poll
     // once with a long timeout here, to avoid race condition in kafka with polling
     // immediately after assignment.
-    while attempts < 100 {
-        if let Some(msg) = consumer.poll(Duration::from_millis(50)) {
+    while attempts < config.read_last_message_timeout_ms {
+        if let Some(msg) = consumer.poll(Duration::from_millis(1)) {
             return match msg {
                 Ok(message) => {
                     if let Some(payload) = message.payload() {

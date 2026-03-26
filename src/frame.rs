@@ -135,6 +135,7 @@ impl Frame {
     ) where
         F: FnOnce(i64, &[u8]),
     {
+        fbb.reset();
         let args = Pu00MessageArgs {
             source_name: Some(fbb.create_string(&config.source_name)),
             message_id,
@@ -147,7 +148,6 @@ impl Frame {
         let pu00 = Pu00Message::create(fbb, &args);
         finish_pu_00_message_buffer(fbb, pu00);
         sink(self.kafka_timestamp(), fbb.finished_data());
-        fbb.reset();
         counter!(OUTGOING_METADATA_MESSAGES).increment(1);
     }
 
@@ -162,6 +162,7 @@ impl Frame {
     ) where
         F: FnOnce(i64, &[u8]),
     {
+        fbb.reset();
         let tofs = fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
         let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
 
@@ -177,7 +178,6 @@ impl Frame {
         let ev44 = Event44Message::create(fbb, &args);
         finish_event_44_message_buffer(fbb, ev44);
         sink(self.kafka_timestamp(), fbb.finished_data());
-        fbb.reset();
         counter!(OUTGOING_EVENT_MESSAGES).increment(1);
     }
 
@@ -191,7 +191,7 @@ impl Frame {
     ) where
         F: FnMut(i64, &[u8]),
     {
-        if self.protons_per_pulse.is_none() || self.period.is_none() {
+        if false && (self.protons_per_pulse.is_none() || self.period.is_none()) {
             warn!(
                 "Failed to emit partial frame; required metadata for this frame was not present. \
             This can occur if an event message and it's corresponding metadata are not \

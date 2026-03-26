@@ -32,3 +32,6 @@ rand = { version = "0.10.0", features = ["chacha"] }
 [[bench]]
 name = "aggregation"
 harness = false
+
+[profile.release]
+lto = "thin"
