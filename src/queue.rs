@@ -197,6 +197,9 @@ impl<'a> FrameQueue<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fake_events::make_fake_flatbuffers_encoded_events;
+    use rand::SeedableRng;
+    use rand::rngs::ChaCha8Rng;
 
     #[test]
     fn test_apply_metadata_to_frame() {
@@ -233,5 +236,97 @@ mod tests {
 
         assert_eq!(frame_queue.frames[1].period(), Some(6));
         assert_eq!(frame_queue.frames[1].vetos(), 0);
+    }
+
+    #[test]
+    fn test_send_expired_frames() {
+        let config = AggregatorConfig {
+            expiry_offset_ms: Some(0), // Frames expire immediately
+            ..Default::default()
+        };
+        let mut queue = FrameQueue::new(&config, 42);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+
+        let num_messages_frame_1 = 5;
+        let events_per_message_frame_1 = 10;
+        let fake_events_frame_1 = make_fake_flatbuffers_encoded_events(
+            &mut rng,
+            20_000_000,
+            num_messages_frame_1,
+            events_per_message_frame_1,
+        );
+
+        let num_messages_frame_2 = 42;
+        let events_per_message_frame_2 = 73;
+        let fake_events_frame_2 = make_fake_flatbuffers_encoded_events(
+            &mut rng,
+            40_000_000,
+            num_messages_frame_2,
+            events_per_message_frame_2,
+        );
+
+        for msg in fake_events_frame_1.iter() {
+            queue.process_raw_message(&msg);
+        }
+        for msg in fake_events_frame_2.iter() {
+            queue.process_raw_message(&msg);
+        }
+
+        let mut fbb = FlatBufferBuilder::new();
+        let mut captured_messages = vec![];
+        queue.send_expired_frames(&mut fbb, |timestamp, payload| {
+            captured_messages.push((timestamp, payload.to_vec()));
+        });
+
+        // Events should have been aggregated into two separate frames, sending a pu00 and
+        // an ev44 per frame
+        assert_eq!(captured_messages.len(), 4);
+
+        // Timestamps - should be FIFO, first frame processed should be first frame emitted
+        assert_eq!(captured_messages[0].0, 20); // 20 = Conversion of frame 1's ref time to Kafka timestamp
+        assert_eq!(captured_messages[1].0, 20);
+        assert_eq!(captured_messages[2].0, 40); // 40 = Conversion of frame 2's ref time to Kafka timestamp
+        assert_eq!(captured_messages[3].0, 40);
+
+        // Schema IDs
+        assert_eq!(
+            get_schema_id(&captured_messages[0].1),
+            Some(b"pu00".as_ref())
+        );
+        assert_eq!(
+            get_schema_id(&captured_messages[1].1),
+            Some(b"ev44".as_ref())
+        );
+        assert_eq!(
+            get_schema_id(&captured_messages[2].1),
+            Some(b"pu00".as_ref())
+        );
+        assert_eq!(
+            get_schema_id(&captured_messages[3].1),
+            Some(b"ev44".as_ref())
+        );
+
+        match deserialize_message(&captured_messages[1].1) {
+            Ok(DeserializedMessage::EventDataEv44(data)) => {
+                assert_eq!(data.reference_time().get(0), 20_000_000);
+                assert_eq!(
+                    data.time_of_flight().unwrap().len(),
+                    num_messages_frame_1 * events_per_message_frame_1
+                );
+            }
+            _ => panic!("Message didn't deserialize to ev44"),
+        }
+
+        match deserialize_message(&captured_messages[3].1) {
+            Ok(DeserializedMessage::EventDataEv44(data)) => {
+                assert_eq!(data.reference_time().get(0), 40_000_000);
+                assert_eq!(
+                    data.time_of_flight().unwrap().len(),
+                    num_messages_frame_2 * events_per_message_frame_2
+                );
+            }
+            _ => panic!("Message didn't deserialize to ev44"),
+        }
     }
 }

@@ -2,8 +2,8 @@
 
 use crate::config::AggregatorConfig;
 use crate::metrics::{
-    OUTGOING_DROPPED_FRAMES, OUTGOING_DROPPED_NEUTRON_EVENTS, OUTGOING_FRAMES,
-    OUTGOING_MESSAGES, OUTGOING_NEUTRON_EVENTS, OutgoingFrameDropReason,
+    OUTGOING_DROPPED_FRAMES, OUTGOING_DROPPED_NEUTRON_EVENTS, OUTGOING_FRAMES, OUTGOING_MESSAGES,
+    OUTGOING_NEUTRON_EVENTS, OutgoingFrameDropReason,
 };
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
@@ -13,7 +13,7 @@ use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{
     Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer,
 };
 use log::warn;
-use metrics::{counter};
+use metrics::counter;
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
 
@@ -92,7 +92,7 @@ impl Frame {
         self.protons_per_pulse
     }
 
-    /// Number of events currently accumulated into this frame
+    /// Number of neutron events currently accumulated into this frame
     pub fn num_events(&self) -> usize {
         self.events.len()
     }
@@ -191,7 +191,7 @@ impl Frame {
     ) where
         F: FnMut(i64, &[u8]),
     {
-        if false && (self.protons_per_pulse.is_none() || self.period.is_none()) {
+        if self.protons_per_pulse.is_none() || self.period.is_none() {
             warn!(
                 "Failed to emit partial frame; required metadata for this frame was not present. \
             This can occur if an event message and it's corresponding metadata are not \
@@ -223,6 +223,7 @@ mod tests {
     use super::*;
     use isis_streaming_data_types::flatbuffers_generated::events_ev44::root_as_event_44_message;
     use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::root_as_pu_00_message;
+    use std::ops::Add;
 
     #[test]
     fn test_emit_messages() {
@@ -305,25 +306,104 @@ mod tests {
     }
 
     #[test]
+    fn test_sort_by_tof() {
+        let mut frame = Frame::new(
+            0,
+            &AggregatorConfig {
+                ..Default::default()
+            },
+        );
+
+        frame.append_events(
+            [
+                Event {
+                    time_of_flight: 1000,
+                    pixel_id: 1,
+                },
+                Event {
+                    time_of_flight: 3000,
+                    pixel_id: 2,
+                },
+                Event {
+                    time_of_flight: 2000,
+                    pixel_id: 3,
+                },
+            ]
+            .into_iter(),
+        );
+
+        frame.sort_by_tof();
+
+        assert_eq!(frame.events[0].time_of_flight, 1000);
+        assert_eq!(frame.events[1].time_of_flight, 2000);
+        assert_eq!(frame.events[2].time_of_flight, 3000);
+
+        assert_eq!(frame.events[0].pixel_id, 1);
+        assert_eq!(frame.events[1].pixel_id, 3);
+        assert_eq!(frame.events[2].pixel_id, 2);
+    }
+
+    #[test]
     fn test_is_ttl_expired() {
         let frame1 = Frame::new(
             123_456_789_000_000,
             &AggregatorConfig {
-                max_events_per_message: Some(10_000),
-                expiry_offset_ms: Some(0),
+                expiry_offset_ms: Some(5000),
                 ..Default::default()
             },
         );
-        assert!(frame1.is_ttl_expired(&Instant::now()));
+        assert!(frame1.is_ttl_expired(&Instant::now().add(Duration::from_millis(6000))));
 
         let frame2 = Frame::new(
             123_456_789_000_000,
             &AggregatorConfig {
-                max_events_per_message: Some(10_000),
-                expiry_offset_ms: Some(10_000),
+                expiry_offset_ms: Some(5000),
                 ..Default::default()
             },
         );
         assert!(!frame2.is_ttl_expired(&Instant::now()));
+    }
+
+    #[test]
+    fn test_add_vetos() {
+        let mut frame = Frame::new(
+            0,
+            &AggregatorConfig {
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(frame.vetos(), 0);
+        frame.add_vetos(0b11010011);
+        assert_eq!(frame.vetos(), 0b11010011);
+        frame.add_vetos(0);
+        assert_eq!(frame.vetos(), 0b11010011);
+        frame.add_vetos(0b11111111);
+        assert_eq!(frame.vetos(), 0b11111111);
+    }
+
+    #[test]
+    fn test_frame_with_missing_metadata_does_not_emit_messages() {
+        let config = AggregatorConfig {
+            ..Default::default()
+        };
+        let mut frame = Frame::new(0, &config);
+
+        frame.append_events(
+            [Event {
+                time_of_flight: 0,
+                pixel_id: 0,
+            }]
+            .into_iter(),
+        );
+
+        let mut captured_messages = vec![];
+
+        let mut fbb = FlatBufferBuilder::new();
+        frame.emit_messages(&mut fbb, &mut 0, &config, |timestamp, payload| {
+            captured_messages.push((timestamp, payload.to_vec()));
+        });
+
+        assert_eq!(captured_messages.len(), 0);
     }
 }
