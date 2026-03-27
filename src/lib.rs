@@ -63,6 +63,10 @@
 //!
 //! A benchmark of the full aggregation process is available in the `benchmarks/` folder, and
 //! is run using `cargo bench`.
+//!
+//! ## Documentation
+//!
+//! `cargo doc --no-deps --open`.
 
 pub mod config;
 pub mod fake_events;

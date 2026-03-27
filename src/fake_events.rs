@@ -1,3 +1,5 @@
+//! Utilities for generating fake event messages.
+
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
@@ -10,7 +12,8 @@ use rand::rngs::ChaCha8Rng;
 use std::iter;
 
 /// Make fake flatbuffers-encoded events
-/// NOTE: this is only used in tests and benchmarks.
+///
+/// This is only used in tests and benchmarks.
 pub fn make_fake_flatbuffers_encoded_events(
     rng: &mut ChaCha8Rng,
     reference_time: i64,

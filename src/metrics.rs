@@ -1,3 +1,5 @@
+//! Prometheus-compatible metrics export.
+
 use crate::config::AggregatorConfig;
 use metrics::{Unit, counter, describe_counter, describe_gauge, gauge};
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -44,7 +46,7 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
     describe_counter!(
         INCOMING_MESSAGES_PROCESSED,
         Unit::Count,
-        "total incoming Kafka messages processed"
+        "Total incoming Kafka messages processed"
     );
     counter!(INCOMING_MESSAGES_PROCESSED, "schema" => "ev44").absolute(0);
     counter!(INCOMING_MESSAGES_PROCESSED, "schema" => "pu00").absolute(0);
@@ -52,7 +54,7 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
     describe_counter!(
         INCOMING_MESSAGES_DROPPED,
         Unit::Count,
-        "total incoming Kafka messages dropped"
+        "Total incoming Kafka messages dropped"
     );
     counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::FAILED_DESERIALIZE)
         .absolute(0);
@@ -64,7 +66,7 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
     describe_counter!(
         INCOMING_NEUTRON_EVENTS,
         Unit::Count,
-        "total incoming event messages processed"
+        "Total incoming event messages processed"
     );
     counter!(INCOMING_NEUTRON_EVENTS).absolute(0);
 
@@ -107,14 +109,14 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
     describe_counter!(
         OUTGOING_DROPPED_FRAMES,
         Unit::Count,
-        "Number of frames dropped due to having insufficient metadata"
+        "Total outgoing dropped frames"
     );
     counter!(OUTGOING_DROPPED_FRAMES, "reason" => OutgoingFrameDropReason::NO_METADATA).absolute(0);
 
     describe_counter!(
         OUTGOING_DROPPED_NEUTRON_EVENTS,
         Unit::Count,
-        "Number of neutron events dropped due to having insufficient metadata"
+        "Total outgoing dropped neutron events"
     );
     counter!(OUTGOING_DROPPED_FRAMES, "reason" => OutgoingFrameDropReason::NO_METADATA).absolute(0);
 
@@ -128,7 +130,7 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
     describe_counter!(
         OUTGOING_KAFKA_ERRORS,
         Unit::Count,
-        "Number of errors producing messages to Kafka"
+        "Total errors producing messages to Kafka"
     );
     counter!(OUTGOING_KAFKA_ERRORS).absolute(0);
 

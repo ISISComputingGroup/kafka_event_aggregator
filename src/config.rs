@@ -1,20 +1,70 @@
+//! Config-handling utilities
+
 use serde::Deserialize;
 use std::collections::HashMap;
 
+/// Global configuration flags for `kafka_event_aggregator`
 #[derive(Deserialize, Debug, Default)]
 pub struct AggregatorConfig {
+    /// Input Kafka topic to read from (usually ends with `_rawEvents`)
     pub input_topic: String,
+
+    /// Output Kafka topic to write to (usually ends with `_events`)
     pub output_topic: String,
+
+    /// How often to look for expired frames to send them to Kafka.
     pub frame_queue_poll_interval_ms: Option<u64>,
+
+    /// Reference-time comparison tolerance.
+    ///
+    /// If two frames have equal reference times to within this tolerance,
+    /// they are considered the same frame. The reference time of the frame
+    /// is determined by the first message which arrives.
     pub reference_time_tolerance_ns: Option<u64>,
+
+    /// Maximum number of neutron events to emit in each output Kafka message.
+    /// Larger messages are somewhat more efficient, however the maximum resulting
+    /// message size must fit within `max.message.bytes` on the Kafka broker.
     pub max_events_per_message: Option<usize>,
+
+    /// When a new frame arrives, it's expiry time will be set to the current time
+    /// plus this offset. All events for this frame are assumed to be consumed, in
+    /// `kafka_event_aggregator`'s kafka producer, within this time.
+    ///
+    /// Note that this may be affected by Kafka consumer batching and must account
+    /// for the fact that messages from the same frame may be delivered in different
+    /// Kafka batches.
     pub expiry_offset_ms: Option<u64>,
+
+    /// A maximum number of queued frames allowed to accumulate in this program. If there
+    /// are more than this many frames, the oldest frames are emitted, even if they have
+    /// not yet reached their expiry time.
     pub max_queued_frames: Option<usize>,
+
+    /// Whether to sort neutron events by time-of-flight before emitting them.
+    ///
+    /// The input events are generally ToF ordered, however this process concatenates
+    /// multiple events from multiple detectors, so the per-detector order is lost.
+    /// This flag restores the ordering.
     pub sort_events_by_tof: Option<bool>,
+
+    /// Timeout on reading the last message(s) emitted to the `_events` stream, to get the
+    /// most recent message ID at startup. This configuration parameter is only used at startup.
     pub read_last_message_timeout_ms: Option<u64>,
+
+    /// String to insert into the `source_name` field of output `pu00` and `ev44` messages.
     pub source_name: Option<String>,
+
+    /// IP and port on which to bind the metrics server.
+    /// Example: `127.0.0.1:8484`
     pub metrics_bind_addr: String,
+
+    /// Map of Kafka producer configuration properties. Values should be provided as strings.
+    /// All properties are passed through to `librdkafka`.
     pub kafka_producer: HashMap<String, String>,
+
+    /// Map of Kafka consumer configuration properties. Values should be provided as strings.
+    /// All properties are passed through to `librdkafka`.
     pub kafka_consumer: HashMap<String, String>,
 }
 
