@@ -3,9 +3,7 @@ use flatbuffers::FlatBufferBuilder;
 use futures::stream::StreamExt;
 use kafka_event_aggregator::config::config_from_str;
 use kafka_event_aggregator::kafka::{get_most_recent_message_id, make_consumer, make_producer};
-use kafka_event_aggregator::metrics::{
-    OUTGOING_KAFKA_ERRORS, OUTGOING_MESSAGE_SIZE, QUEUE_FRAMES, initialize_metrics,
-};
+use kafka_event_aggregator::metrics::{OUTGOING_KAFKA_ERRORS, OUTGOING_MESSAGE_SIZE, QUEUE_FRAMES, initialize_metrics, INCOMING_MESSAGE_SIZE, INCOMING_MESSAGES_DROPPED, IncomingMessageDropReason};
 use kafka_event_aggregator::queue::FrameQueue;
 use log::{debug, error, info, warn};
 use metrics::{counter, gauge};
@@ -68,10 +66,12 @@ async fn main() -> anyhow::Result<()> {
                 if let Ok(msg) = msg {
                     if let Some(payload) = msg.payload() {
                         let start = Instant::now();
+                        counter!(INCOMING_MESSAGE_SIZE).increment(payload.len() as u64);
                         frame_queue.process_raw_message(payload);
                         debug!("Processing raw msg ({} bytes) took {} us", payload.len(), start.elapsed().as_micros());
                     } else {
                         warn!("Received event without payload; ignoring.");
+                        counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::NO_PAYLOAD).increment(1);
                     }
                 } else {
                     error!("Error reading from stream {:?}", msg);
@@ -86,16 +86,19 @@ async fn main() -> anyhow::Result<()> {
                             .payload(msg)
                             .timestamp(timestamp)
                     );
-                    counter!(OUTGOING_MESSAGE_SIZE).increment(msg.len() as u64);
 
                     if let Err((e, _)) = result {
                         warn!("Error sending message to kafka: {:?}", e);
                         counter!(OUTGOING_KAFKA_ERRORS).increment(1);
+                    } else {
+                        counter!(OUTGOING_MESSAGE_SIZE).increment(msg.len() as u64);
                     }
                 });
-                debug!("Sending messages {} -> {} took {} us", len_start, frame_queue.len(), start.elapsed().as_micros());
-
-                gauge!(QUEUE_FRAMES).set(frame_queue.len() as f64);
+                let len_end = frame_queue.len();
+                if len_start != len_end {
+                    debug!("Sending messages {} -> {} took {} us", len_start, len_end, start.elapsed().as_micros());
+                }
+                gauge!(QUEUE_FRAMES).set(len_end as f64);
             },
             _ = ctrl_c() => {
                 info!("Shutting down after ctrl-c");

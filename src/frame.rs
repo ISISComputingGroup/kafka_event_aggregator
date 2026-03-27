@@ -1,10 +1,7 @@
 //! Internal representation of a frame of data.
 
 use crate::config::AggregatorConfig;
-use crate::metrics::{
-    OUTGOING_DROPPED_FRAMES_NO_METADATA, OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA,
-    OUTGOING_EVENT_MESSAGES, OUTGOING_FRAMES, OUTGOING_METADATA_MESSAGES, OUTGOING_NEUTRON_EVENTS,
-};
+use crate::metrics::{OUTGOING_DROPPED_FRAMES, OUTGOING_DROPPED_NEUTRON_EVENTS, OUTGOING_MESSAGES, OUTGOING_FRAMES, OUTGOING_NEUTRON_EVENTS, OutgoingFrameDropReason};
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
@@ -148,7 +145,7 @@ impl Frame {
         let pu00 = Pu00Message::create(fbb, &args);
         finish_pu_00_message_buffer(fbb, pu00);
         sink(self.kafka_timestamp(), fbb.finished_data());
-        counter!(OUTGOING_METADATA_MESSAGES).increment(1);
+        counter!(OUTGOING_MESSAGES, "schema" => "pu00").increment(1);
     }
 
     /// Emit an ev44 message for the provided events to the specified sink.
@@ -178,7 +175,7 @@ impl Frame {
         let ev44 = Event44Message::create(fbb, &args);
         finish_event_44_message_buffer(fbb, ev44);
         sink(self.kafka_timestamp(), fbb.finished_data());
-        counter!(OUTGOING_EVENT_MESSAGES).increment(1);
+        counter!(OUTGOING_MESSAGES, "schema" => "ev44").increment(1);
     }
 
     /// Emit pu00 and ev44 messages representing this frame to the specified sink.
@@ -197,9 +194,8 @@ impl Frame {
             This can occur if an event message and it's corresponding metadata are not \
             received within expiry_offset_ms of each other."
             );
-            counter!(OUTGOING_DROPPED_FRAMES_NO_METADATA).increment(1);
-            counter!(OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA)
-                .increment(self.events.len() as u64);
+            counter!(OUTGOING_DROPPED_FRAMES, "reason" => OutgoingFrameDropReason::NO_METADATA).increment(1);
+            counter!(OUTGOING_DROPPED_NEUTRON_EVENTS, "reason" => OutgoingFrameDropReason::NO_METADATA).increment(self.events.len() as u64);
             return;
         }
 

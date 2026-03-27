@@ -3,10 +3,7 @@
 
 use crate::config::AggregatorConfig;
 use crate::frame::{Event, Frame};
-use crate::metrics::{
-    INCOMING_EVENT_MESSAGES_PROCESSED, INCOMING_INVALID_MESSAGES_DISCARDED, INCOMING_MESSAGE_SIZE,
-    INCOMING_MESSAGES_PROCESSED, INCOMING_METADATA_MESSAGES_PROCESSED, INCOMING_NEUTRON_EVENTS,
-};
+use crate::metrics::{INCOMING_MESSAGES_PROCESSED, INCOMING_MESSAGES_DROPPED, INCOMING_NEUTRON_EVENTS, IncomingMessageDropReason};
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::Event44Message;
 use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::Pu00Message;
@@ -176,23 +173,21 @@ impl<'a> FrameQueue<'a> {
         match deserialize_message(msg) {
             Ok(DeserializedMessage::EventDataEv44(data)) => {
                 self.process_raw_ev44_message(&data);
-                counter!(INCOMING_EVENT_MESSAGES_PROCESSED).increment(1);
+                counter!(INCOMING_MESSAGES_PROCESSED, "schema" => "ev44").increment(1);
             }
             Ok(DeserializedMessage::PulseMetadataPu00(data)) => {
                 self.process_raw_pu00_metadata_message(&data);
-                counter!(INCOMING_METADATA_MESSAGES_PROCESSED).increment(1);
+                counter!(INCOMING_MESSAGES_PROCESSED, "schema" => "pu00").increment(1);
             }
             Ok(_) => {
                 warn!("Unhandled message type: {:?}", get_schema_id(msg));
+                counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::UNKNOWN_SCHEMA).increment(1);
             }
             Err(e) => {
                 warn!("Cannot deserialize message: {e:?}");
-                counter!(INCOMING_INVALID_MESSAGES_DISCARDED).increment(1);
+                counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::FAILED_DESERIALIZE).increment(1);
             }
         }
-
-        counter!(INCOMING_MESSAGES_PROCESSED).increment(1);
-        counter!(INCOMING_MESSAGE_SIZE).increment(msg.len() as u64);
     }
 }
 
