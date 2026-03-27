@@ -8,7 +8,6 @@ pub const INCOMING_MESSAGES_PROCESSED: &str = "aggregator_incoming_messages_proc
 pub const INCOMING_NEUTRON_EVENTS: &str = "aggregator_incoming_neutron_events";
 pub const INCOMING_MESSAGE_SIZE: &str = "aggregator_incoming_message_size";
 
-
 pub const OUTGOING_MESSAGE_SIZE: &str = "aggregator_outgoing_message_size";
 pub const OUTGOING_FRAMES: &str = "aggregator_outgoing_frames";
 pub const OUTGOING_MESSAGES: &str = "aggregator_outgoing_messages";
@@ -19,8 +18,10 @@ pub const OUTGOING_DROPPED_NEUTRON_EVENTS: &str = "aggregator_outgoing_dropped_n
 
 pub const OUTGOING_KAFKA_ERRORS: &str = "aggregator_outgoing_kafka_errors";
 pub const QUEUE_FRAMES: &str = "aggregator_queue_frames";
+pub const LATEST_MESSAGE_ID: &str = "aggregator_latest_message_id";
 
 pub struct IncomingMessageDropReason {}
+
 impl IncomingMessageDropReason {
     pub const NO_PAYLOAD: &str = "no_payload";
     pub const FAILED_DESERIALIZE: &str = "failed_deserialize";
@@ -45,14 +46,20 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
         Unit::Count,
         "total incoming Kafka messages processed"
     );
-    counter!(INCOMING_MESSAGES_PROCESSED).absolute(0);
     counter!(INCOMING_MESSAGES_PROCESSED, "schema" => "ev44").absolute(0);
     counter!(INCOMING_MESSAGES_PROCESSED, "schema" => "pu00").absolute(0);
 
-    counter!(INCOMING_MESSAGES_DROPPED).absolute(0);
-    counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::FAILED_DESERIALIZE).absolute(0);
-    counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::NO_PAYLOAD).absolute(0);
-    counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::UNKNOWN_SCHEMA).absolute(0);
+    describe_counter!(
+        INCOMING_MESSAGES_DROPPED,
+        Unit::Count,
+        "total incoming Kafka messages dropped"
+    );
+    counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::FAILED_DESERIALIZE)
+        .absolute(0);
+    counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::NO_PAYLOAD)
+        .absolute(0);
+    counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::UNKNOWN_SCHEMA)
+        .absolute(0);
 
     describe_counter!(
         INCOMING_NEUTRON_EVENTS,
@@ -87,7 +94,6 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
         Unit::Count,
         "Total metadata messages sent"
     );
-    counter!(OUTGOING_MESSAGES).absolute(0);
     counter!(OUTGOING_MESSAGES, "schema" => "ev44").absolute(0);
     counter!(OUTGOING_MESSAGES, "schema" => "pu00").absolute(0);
 
@@ -103,7 +109,6 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
         Unit::Count,
         "Number of frames dropped due to having insufficient metadata"
     );
-    counter!(OUTGOING_DROPPED_FRAMES).absolute(0);
     counter!(OUTGOING_DROPPED_FRAMES, "reason" => OutgoingFrameDropReason::NO_METADATA).absolute(0);
 
     describe_counter!(
@@ -111,7 +116,6 @@ pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
         Unit::Count,
         "Number of neutron events dropped due to having insufficient metadata"
     );
-    counter!(OUTGOING_DROPPED_NEUTRON_EVENTS).absolute(0);
     counter!(OUTGOING_DROPPED_FRAMES, "reason" => OutgoingFrameDropReason::NO_METADATA).absolute(0);
 
     describe_gauge!(

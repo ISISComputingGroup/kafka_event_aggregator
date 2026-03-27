@@ -3,7 +3,10 @@
 
 use crate::config::AggregatorConfig;
 use crate::frame::{Event, Frame};
-use crate::metrics::{INCOMING_MESSAGES_PROCESSED, INCOMING_MESSAGES_DROPPED, INCOMING_NEUTRON_EVENTS, IncomingMessageDropReason};
+use crate::metrics::{
+    INCOMING_MESSAGES_DROPPED, INCOMING_MESSAGES_PROCESSED, INCOMING_NEUTRON_EVENTS,
+    IncomingMessageDropReason,
+};
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::Event44Message;
 use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::Pu00Message;

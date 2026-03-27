@@ -1,7 +1,10 @@
 //! Internal representation of a frame of data.
 
 use crate::config::AggregatorConfig;
-use crate::metrics::{OUTGOING_DROPPED_FRAMES, OUTGOING_DROPPED_NEUTRON_EVENTS, OUTGOING_MESSAGES, OUTGOING_FRAMES, OUTGOING_NEUTRON_EVENTS, OutgoingFrameDropReason};
+use crate::metrics::{
+    OUTGOING_DROPPED_FRAMES, OUTGOING_DROPPED_NEUTRON_EVENTS, OUTGOING_FRAMES,
+    OUTGOING_MESSAGES, OUTGOING_NEUTRON_EVENTS, OutgoingFrameDropReason,
+};
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
@@ -10,7 +13,7 @@ use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::{
     Pu00Message, Pu00MessageArgs, finish_pu_00_message_buffer,
 };
 use log::warn;
-use metrics::counter;
+use metrics::{counter};
 use rayon::prelude::*;
 use std::time::{Duration, Instant};
 
@@ -194,7 +197,8 @@ impl Frame {
             This can occur if an event message and it's corresponding metadata are not \
             received within expiry_offset_ms of each other."
             );
-            counter!(OUTGOING_DROPPED_FRAMES, "reason" => OutgoingFrameDropReason::NO_METADATA).increment(1);
+            counter!(OUTGOING_DROPPED_FRAMES, "reason" => OutgoingFrameDropReason::NO_METADATA)
+                .increment(1);
             counter!(OUTGOING_DROPPED_NEUTRON_EVENTS, "reason" => OutgoingFrameDropReason::NO_METADATA).increment(self.events.len() as u64);
             return;
         }

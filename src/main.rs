@@ -3,7 +3,10 @@ use flatbuffers::FlatBufferBuilder;
 use futures::stream::StreamExt;
 use kafka_event_aggregator::config::config_from_str;
 use kafka_event_aggregator::kafka::{get_most_recent_message_id, make_consumer, make_producer};
-use kafka_event_aggregator::metrics::{OUTGOING_KAFKA_ERRORS, OUTGOING_MESSAGE_SIZE, QUEUE_FRAMES, initialize_metrics, INCOMING_MESSAGE_SIZE, INCOMING_MESSAGES_DROPPED, IncomingMessageDropReason};
+use kafka_event_aggregator::metrics::{
+    INCOMING_MESSAGE_SIZE, INCOMING_MESSAGES_DROPPED, IncomingMessageDropReason,
+    OUTGOING_KAFKA_ERRORS, OUTGOING_MESSAGE_SIZE, QUEUE_FRAMES, initialize_metrics,
+};
 use kafka_event_aggregator::queue::FrameQueue;
 use log::{debug, error, info, warn};
 use metrics::{counter, gauge};

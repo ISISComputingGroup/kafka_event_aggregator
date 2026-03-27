@@ -97,8 +97,7 @@ pub fn get_most_recent_message_id(config: &AggregatorConfig) -> Result<i64> {
 
     let consumer: BaseConsumer<DefaultConsumerContext> = client_config.create()?;
 
-    let metadata =
-        consumer.fetch_metadata(Some(config.output_topic()), Duration::from_secs(10))?;
+    let metadata = consumer.fetch_metadata(Some(config.output_topic()), Duration::from_secs(10))?;
 
     metadata
         .topics()
