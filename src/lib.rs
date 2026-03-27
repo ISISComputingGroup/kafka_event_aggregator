@@ -5,17 +5,17 @@
 //!
 //! ## Operation
 //!
-//! When data arrives on the `_rawEvents` topic, `kafka_event_aggregator` will:
+//! When data arrives on `config.input_topic` (usually `_rawEvents`), `kafka_event_aggregator` will:
 //! - Check whether this data forms part of an existing frame. If not, a new Frame will be created,
-//!   with a time-to-live of `expiry_offset_ms`.
+//!   with a time-to-live `config.expiry_offset_ms` in the future.
 //! - Append neutron events from the new data, or combine veto statuses from the new data, with the
-//!   existing or just-created frame
+//!   existing or newly-created frame
 //!
-//! When a frame of data's time-to-live expires, and the next `frame_queue_poll_interval` timer
-//! interval expires, `kafka_event_aggregator` will:
+//! When a frame of data's time-to-live expires, and the next `config.frame_queue_poll_interval`
+//! timer interval expires, `kafka_event_aggregator` will:
 //! - Sort the events in the frame by increasing time of flight
-//! - Emit a `pu00` frame metadata message to the `_events` stream
-//! - Emit zero or more `ev44` messages, each containing no more than `max_events_per_message`
+//! - Emit a `pu00` frame metadata message to the `config.output_topic` (usually `_events`) stream
+//! - Emit zero or more `ev44` messages, each containing at most `config.max_events_per_message`
 //!   neutron events per `ev44` message.
 //!
 //! ## `events` stream format
@@ -25,11 +25,10 @@
 //!   metadata relevant to the neutron events until the next `pu00` message. The messages are
 //!   emitted in order by `message_id`, but if the `_events` stream is distributed across multiple
 //!   Kafka partitions then it is not guaranteed to be received in order.
-//!   If the `_events` stream is on a single partition, ordering by `message_id`
-//!   is equivalent to the message order in Kafka (as long as `enable.idempotence = true` in the
-//!   producer)
+//!   If the `_events` stream is on a single partition, and `enable.idempotence = true` in the
+//!   producer, then ordering by `message_id` is equivalent to the message order in Kafka
 //! - Events will be emitted ordered in time-of-flight, both within a single `ev44` message and
-//!   across multiple `ev44` messages within one frame, if `sort_events_by_tof = true`.
+//!   across multiple `ev44` messages within one frame, if `config.sort_events_by_tof = true`.
 //! - Each `ev44` on the `_events` stream will contain at most `max_events_per_message` events
 //! - The `reference_time` of all `pu00` and `ev44` messages which make up a frame will be
 //!   identical.
@@ -46,8 +45,24 @@
 //!   streaming hardware, and the fact that each streaming detector may emit any number of event
 //!   messages, it is not possible to tell whether all data from a frame has been
 //!   received. It is **assumed** that all data corresponding to a frame will appear in the `events`
-//!   stream within `expiry_offset_ms` of the *first* message for that frame arriving. Events that
-//!   come in too late are dropped.
+//!   stream within `config.expiry_offset_ms` of the *first* message for that frame arriving.
+//!   Events that come in too late are dropped.
+//!
+//! ## Metrics
+//!
+//! Prometheus-compatible metrics are provided by a scrape endpoint, configured by
+//! `config.metrics_bind_addr`. This endpoint can also be accessed by curl or a standard web
+//! browser.
+//!
+//! ## Logging
+//!
+//! `kafka_event_aggregator` accepts command-line `-v` and `-q` flags to increase and decrease
+//! logging verbosity respectively. The flags may be supplied multiple times.
+//!
+//! ## Benchmarks
+//!
+//! A benchmark of the full aggregation process is available in the `benchmarks/` folder, and
+//! is run using `cargo bench`.
 
 pub mod config;
 pub mod fake_events;
