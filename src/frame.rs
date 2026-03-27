@@ -121,7 +121,7 @@ impl Frame {
     }
 
     /// Sort the events in this frame by time-of-flight
-    fn sort_by_tof(&mut self) {
+    pub fn sort_by_tof(&mut self) {
         self.events.par_sort_unstable_by_key(|e| e.time_of_flight);
     }
 
@@ -201,10 +201,6 @@ impl Frame {
             counter!(OUTGOING_DROPPED_NEUTRON_EVENTS_NO_METADATA)
                 .increment(self.events.len() as u64);
             return;
-        }
-
-        if config.sort_events_by_tof {
-            self.sort_by_tof();
         }
 
         self.emit_pu00_message(fbb, *message_id, config, &mut sink);

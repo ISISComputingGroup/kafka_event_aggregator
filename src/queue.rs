@@ -13,6 +13,7 @@ use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::Pu00M
 use isis_streaming_data_types::{DeserializedMessage, deserialize_message, get_schema_id};
 use log::{debug, warn};
 use metrics::counter;
+use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::time::Instant;
 
@@ -51,8 +52,11 @@ impl<'a> FrameQueue<'a> {
     where
         F: FnMut(i64, &[u8]),
     {
+        let now = Instant::now();
+        let mut completed_frames = vec![];
+
         while self.frames.len() > self.config.max_queued_frames {
-            let mut completed_frame = self
+            let completed_frame = self
                 .frames
                 .pop_front()
                 .expect("unreachable; frames is empty after checking a frame exists");
@@ -62,10 +66,8 @@ impl<'a> FrameQueue<'a> {
                 completed_frame.reference_time(),
                 completed_frame.num_events(),
             );
-            completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
+            completed_frames.push(completed_frame);
         }
-
-        let now = Instant::now();
 
         while self
             .frames
@@ -73,7 +75,7 @@ impl<'a> FrameQueue<'a> {
             .map(|f| f.is_ttl_expired(&now))
             .unwrap_or(false)
         {
-            let mut completed_frame = self
+            let completed_frame = self
                 .frames
                 .pop_front()
                 .expect("unreachable; frames is empty after checking first frame exists");
@@ -83,8 +85,18 @@ impl<'a> FrameQueue<'a> {
                 completed_frame.reference_time(),
                 completed_frame.num_events(),
             );
-            completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
+            completed_frames.push(completed_frame);
         }
+
+        if self.config.sort_events_by_tof {
+            completed_frames
+                .par_iter_mut()
+                .for_each(|completed_frame| completed_frame.sort_by_tof());
+        }
+
+        completed_frames.iter_mut().for_each(|completed_frame| {
+            completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
+        })
     }
 
     /// Applies a mutation to a frame with the given reference time.
