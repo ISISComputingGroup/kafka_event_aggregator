@@ -55,7 +55,7 @@ impl<'a> FrameQueue<'a> {
         let now = Instant::now();
         let mut completed_frames = vec![];
 
-        while self.frames.len() > self.config.max_queued_frames {
+        while self.frames.len() > self.config.max_queued_frames() {
             let completed_frame = self
                 .frames
                 .pop_front()
@@ -88,7 +88,7 @@ impl<'a> FrameQueue<'a> {
             completed_frames.push(completed_frame);
         }
 
-        if self.config.sort_events_by_tof {
+        if self.config.sort_events_by_tof() {
             completed_frames
                 .par_iter_mut()
                 .for_each(|completed_frame| completed_frame.sort_by_tof());
@@ -118,7 +118,7 @@ impl<'a> FrameQueue<'a> {
             .rev() // Start search from the most recent frame; this is where it is most likely to be.
             .find(|frame| {
                 frame.reference_time().abs_diff(reference_time)
-                    <= self.config.reference_time_tolerance_ns
+                    <= self.config.reference_time_tolerance_ns()
             }) {
             Some(frame) => frame,
             None => {
@@ -203,8 +203,8 @@ mod tests {
     #[test]
     fn test_apply_metadata_to_frame() {
         let config = AggregatorConfig {
-            max_events_per_message: 2,
-            reference_time_tolerance_ns: 10,
+            max_events_per_message: Some(2),
+            reference_time_tolerance_ns: Some(10),
             ..Default::default()
         };
         let mut frame_queue = FrameQueue::new(&config, 10);

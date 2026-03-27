@@ -58,10 +58,10 @@ impl Frame {
     pub fn new(reference_time: i64, config: &AggregatorConfig) -> Self {
         Frame {
             reference_time,
-            ttl_deadline: Instant::now() + Duration::from_millis(config.expiry_offset_ms),
+            ttl_deadline: Instant::now() + Duration::from_millis(config.expiry_offset_ms()),
             period: None,
             vetos: 0,
-            events: Vec::with_capacity(config.max_events_per_message),
+            events: Vec::with_capacity(config.max_events_per_message()),
             protons_per_pulse: None,
         }
     }
@@ -137,7 +137,7 @@ impl Frame {
     {
         fbb.reset();
         let args = Pu00MessageArgs {
-            source_name: Some(fbb.create_string(&config.source_name)),
+            source_name: Some(fbb.create_string(config.source_name())),
             message_id,
             proton_charge: self.protons_per_pulse,
             vetos: Some(self.vetos),
@@ -167,7 +167,7 @@ impl Frame {
         let pixel_ids = fbb.create_vector(&events.iter().map(|e| e.pixel_id).collect::<Vec<_>>());
 
         let args = Event44MessageArgs {
-            source_name: Some(fbb.create_string(&config.source_name)),
+            source_name: Some(fbb.create_string(config.source_name())),
             message_id,
             reference_time: Some(fbb.create_vector(&[self.reference_time])),
             reference_time_index: Some(fbb.create_vector(&[0])),
@@ -207,7 +207,7 @@ impl Frame {
         *message_id += 1;
 
         self.events
-            .chunks(config.max_events_per_message)
+            .chunks(config.max_events_per_message())
             .for_each(|chunk| {
                 self.emit_ev44_message(fbb, *message_id, chunk, config, &mut sink);
                 *message_id += 1;
@@ -255,7 +255,7 @@ mod tests {
             &mut fbb,
             &mut 0,
             &AggregatorConfig {
-                max_events_per_message: 2,
+                max_events_per_message: Some(2),
                 ..Default::default()
             },
             |_, e| captured_messages.push(e.to_vec()),
@@ -309,8 +309,8 @@ mod tests {
         let frame1 = Frame::new(
             123_456_789_000_000,
             &AggregatorConfig {
-                max_events_per_message: 10_000,
-                expiry_offset_ms: 0,
+                max_events_per_message: Some(10_000),
+                expiry_offset_ms: Some(0),
                 ..Default::default()
             },
         );
@@ -319,8 +319,8 @@ mod tests {
         let frame2 = Frame::new(
             123_456_789_000_000,
             &AggregatorConfig {
-                max_events_per_message: 10_000,
-                expiry_offset_ms: 10_000,
+                max_events_per_message: Some(10_000),
+                expiry_offset_ms: Some(10_000),
                 ..Default::default()
             },
         );

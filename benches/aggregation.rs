@@ -16,11 +16,11 @@ use std::time::Duration;
 
 fn make_config() -> AggregatorConfig {
     AggregatorConfig {
-        max_events_per_message: 100_000,
-        sort_events_by_tof: true,
-        expiry_offset_ms: 0,
-        reference_time_tolerance_ns: 0,
-        max_queued_frames: 50,
+        max_events_per_message: Some(100_000),
+        sort_events_by_tof: Some(true),
+        expiry_offset_ms: Some(0),
+        reference_time_tolerance_ns: Some(0),
+        max_queued_frames: Some(50),
         ..Default::default()
     }
 }

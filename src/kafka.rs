@@ -13,15 +13,15 @@ use std::time::Duration;
 pub fn make_consumer(config: &AggregatorConfig) -> Result<StreamConsumer<DefaultConsumerContext>> {
     let mut client_config = ClientConfig::new();
 
-    for (k, v) in &config.kafka_consumer {
+    for (k, v) in config.kafka_consumer_settings() {
         client_config.set(k, v);
     }
 
     let consumer: StreamConsumer<DefaultConsumerContext> = client_config.create()?;
 
     consumer
-        .subscribe(&[&config.input_topic])
-        .with_context(|| format!("Failed to subscribe to topic {}", config.input_topic))?;
+        .subscribe(&[config.input_topic()])
+        .with_context(|| format!("Failed to subscribe to topic {}", config.input_topic()))?;
 
     Ok(consumer)
 }
@@ -32,21 +32,21 @@ fn latest_message_on_one_partition(
     partition: i32,
 ) -> Result<i64> {
     let (low, high) = consumer.fetch_watermarks(
-        &config.output_topic,
+        config.output_topic(),
         partition,
-        Duration::from_millis(config.read_last_message_timeout_ms),
+        Duration::from_millis(config.read_last_message_timeout_ms()),
     )?;
 
     if high <= low {
         bail!(
             "Partition {} on topic {} has no messages; skipping",
             partition,
-            config.output_topic
+            config.output_topic()
         );
     }
 
     let mut tpl = TopicPartitionList::new();
-    tpl.add_partition_offset(&config.output_topic, partition, Offset(high - 1))?;
+    tpl.add_partition_offset(config.output_topic(), partition, Offset(high - 1))?;
     consumer.assign(&tpl)?;
 
     let mut attempts = 0;
@@ -54,7 +54,7 @@ fn latest_message_on_one_partition(
     // Note: must call poll repeatedly with short timeouts, rather than calling poll
     // once with a long timeout here, to avoid race condition in kafka with polling
     // immediately after assignment.
-    while attempts < config.read_last_message_timeout_ms {
+    while attempts < config.read_last_message_timeout_ms() {
         if let Some(msg) = consumer.poll(Duration::from_millis(1)) {
             return match msg {
                 Ok(message) => {
@@ -91,18 +91,19 @@ fn latest_message_on_one_partition(
 pub fn get_most_recent_message_id(config: &AggregatorConfig) -> Result<i64> {
     let mut client_config = ClientConfig::new();
 
-    for (k, v) in &config.kafka_consumer {
+    for (k, v) in config.kafka_consumer_settings() {
         client_config.set(k, v);
     }
 
     let consumer: BaseConsumer<DefaultConsumerContext> = client_config.create()?;
 
-    let metadata = consumer.fetch_metadata(Some(&config.output_topic), Duration::from_secs(10))?;
+    let metadata =
+        consumer.fetch_metadata(Some(config.output_topic()), Duration::from_secs(10))?;
 
     metadata
         .topics()
         .iter()
-        .find(|t| t.name() == config.output_topic)
+        .find(|t| t.name() == config.output_topic())
         .with_context(|| "Cannot get topic")?
         .partitions()
         .iter()
@@ -119,14 +120,14 @@ pub fn get_most_recent_message_id(config: &AggregatorConfig) -> Result<i64> {
             },
         )
         .max()
-        .with_context(|| format!("No usable messages on topic {}", config.output_topic))
+        .with_context(|| format!("No usable messages on topic {}", config.output_topic()))
 }
 
 pub fn make_producer(
     config: &AggregatorConfig,
 ) -> Result<ThreadedProducer<DefaultProducerContext>> {
     let mut client_config = ClientConfig::new();
-    for (k, v) in &config.kafka_producer {
+    for (k, v) in config.kafka_producer_settings() {
         client_config.set(k, v);
     }
     Ok(client_config.create()?)

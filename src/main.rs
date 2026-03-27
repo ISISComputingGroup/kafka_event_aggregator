@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
     let producer = make_producer(&config)?;
 
     let mut frame_queue_poll_interval =
-        tokio::time::interval(Duration::from_millis(config.frame_queue_poll_interval_ms));
+        tokio::time::interval(Duration::from_millis(config.frame_queue_poll_interval_ms()));
 
     let next_message_id = get_most_recent_message_id(&config)
         .map(|n| n + 1)

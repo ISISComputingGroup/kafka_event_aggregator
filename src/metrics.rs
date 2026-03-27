@@ -24,7 +24,7 @@ pub const QUEUE_FRAMES: &str = "queue_frames";
 pub fn initialize_metrics(config: &AggregatorConfig) -> anyhow::Result<()> {
     let builder = PrometheusBuilder::new()
         .with_recommended_naming(true)
-        .with_http_listener((config.metrics_bind_addr).parse::<SocketAddr>()?);
+        .with_http_listener((config.metrics_bind_addr()).parse::<SocketAddr>()?);
 
     builder.install()?;
 
