@@ -70,10 +70,10 @@ fn benchmark_full_aggregation(c: &mut Criterion) {
                         for msg in messages {
                             frame_queue.process_raw_message(msg);
                         }
-                        frame_queue.send_expired_frames(&mut fbb, |timestamp, msg| {
+                        frame_queue.send_expired_frames(&mut fbb, |msg| {
                             // Use to_vec() to simulate the copy that librdkafka does
                             // (rdkafka uses RD_KAFKA_MSG_F_COPY)
-                            black_box((timestamp, msg.to_vec()));
+                            black_box(msg.payload.to_vec());
                         })
                     },
                     BatchSize::LargeInput,

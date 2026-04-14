@@ -126,8 +126,20 @@ pub fn make_producer(
     config: &AggregatorConfig,
 ) -> Result<ThreadedProducer<DefaultProducerContext>> {
     let mut client_config = ClientConfig::new();
+
+    // Check that enable.idempotence has been set - if not, fail loudly as
+    // this is not a valid configuration for `kafka_event_aggregator` and the stream format
+    // will be incorrect.
+    if config.kafka_producer_settings().get("enable.idempotence") != Some(&"true".to_owned()) {
+        bail!("Kafka producer is not set to be idempotent.
+It is not possible to produce a coherent stream with a non-idempotent producer as messages may be duplicated, missing, or out of order (within a single partition).
+See documentation of this program for details of the _events stream format.
+")
+    }
+
     for (k, v) in config.kafka_producer_settings() {
         client_config.set(k, v);
     }
+
     Ok(client_config.create()?)
 }

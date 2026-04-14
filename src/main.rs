@@ -83,18 +83,20 @@ async fn main() -> anyhow::Result<()> {
             _ = frame_queue_poll_interval.tick() => {
                 let start = Instant::now();
                 let len_start = frame_queue.len();
-                frame_queue.send_expired_frames(&mut fbb, |timestamp, msg| {
+                frame_queue.send_expired_frames(&mut fbb, |msg| {
+                    let key = msg.key.to_be_bytes();
                     let result = producer.send(
                         BaseRecord::<[u8], [u8]>::to(&config.output_topic)
-                            .payload(msg)
-                            .timestamp(timestamp)
+                            .timestamp(msg.kafka_timestamp)
+                            .key(&key)
+                            .payload(msg.payload)
                     );
 
                     if let Err((e, _)) = result {
                         warn!("Error sending message to kafka: {:?}", e);
                         counter!(OUTGOING_KAFKA_ERRORS).increment(1);
                     } else {
-                        counter!(OUTGOING_MESSAGE_SIZE).increment(msg.len() as u64);
+                        counter!(OUTGOING_MESSAGE_SIZE).increment(msg.payload.len() as u64);
                     }
                 });
                 let len_end = frame_queue.len();
