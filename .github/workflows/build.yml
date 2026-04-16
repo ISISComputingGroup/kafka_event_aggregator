@@ -68,8 +68,7 @@ jobs:
         shell: cmd
         # u wot?
         run: |
-          echo|set /p="<meta http-equiv="refresh" content="0; url=kafka_event_aggregator/">" > target/doc/index.html
-          exit /B 0
+          echo '<meta http-equiv="refresh" content="0; url=kafka_event_aggregator/">' > target/doc/index.html
       - name: Upload artifacts (docs)
         uses: actions/upload-artifact@v7
         with:
