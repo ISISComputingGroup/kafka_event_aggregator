@@ -1,0 +1,37 @@
+[package]
+name = "kafka_event_aggregator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.50.0", features = ["macros", "rt-multi-thread", "signal"] }
+futures = "0.3.32"
+log = "0.4.29"
+env_logger = "0.11.9"
+rayon = "1.11.0"
+serde = "1.0.228"
+toml = "1.0.6"
+clap = { version = "4.5.61", features = ["derive"] }
+clap-verbosity-flag = "3.0.4"
+anyhow = "1.0.102"
+metrics = "0.24.3"
+metrics-exporter-prometheus = { version = "0.18.1" }
+isis_streaming_data_types = { version = "0.1.0"}
+flatbuffers = "*"
+rand = { version = "0.10.0", features = ["chacha"] }
+
+[target.'cfg(windows)'.dependencies]
+rdkafka = { version="0.39.0", features = ["cmake_build"] }
+
+[target.'cfg(unix)'.dependencies]
+rdkafka = { version="0.39.0", features = ["cmake_build", "curl", "ssl-vendored"] }
+
+[dev-dependencies]
+criterion = { version = "0.8.2",  features = ["html_reports"]}
+
+[[bench]]
+name = "aggregation"
+harness = false
+
+[profile.release]
+lto = "thin"

@@ -1,0 +1,56 @@
+# Kafka topic to consume from.
+input_topic = 'somemachine_rawEvents'
+
+# Kafka topic to write aggregated events to.
+output_topic = 'somemachine_events'
+
+# Frequency at which the queue of frames is checked for expired frames (milliseconds).
+frame_queue_poll_interval_ms = 100
+
+# Maximum number of neutron events to write to a single output message, before
+# starting a new message.
+max_events_per_message = 100000
+
+# If two neutron events (or their corresponding frame headers) have equal
+# reference times to within this precision, they are considered the same frame
+# (and therefore events will be merged).
+reference_time_tolerance_ns = 100
+
+# Expiry offset.
+# After the *first* message in a frame is received, all other messages for that
+# frame are expected to be delievered within this time interval.
+# Note: this adds to the latency of the `_events` output stream.
+expiry_offset_ms = 500
+
+# Source name in output messages.
+source_name = "kafka-event-aggregator"
+
+# Address on which to serve metrics via prometheus.
+metrics_bind_addr = "127.0.0.1:8484"
+
+# Whether to sort outgoing events by time-of-flight.
+sort_events_by_tof = true
+
+# How long to wait (ms) to read the last message from the _events topic at startup
+read_last_message_timeout_ms = 500
+
+# Kafka configuration parameters (producer)
+[kafka_producer]
+"bootstrap.servers" = "itachi.isis.cclrc.ac.uk:9092"
+"enable.idempotence" = "true"
+"queue.buffering.max.messages" = "2147483647"
+"queue.buffering.max.kbytes" = "8388608"  # 8 GiB
+"queue.buffering.max.ms" = "200"
+"batch.size" = "2147483647"
+
+# Kafka configuration parameters (consumer)
+[kafka_consumer]
+"bootstrap.servers" = "itachi.isis.cclrc.ac.uk:9092"
+"group.id" = "kafka-event-aggregator-somemachine"
+"enable.auto.commit" = "true"
+"auto.commit.interval.ms" = "5000"
+"queued.min.messages" = "100000"
+"queued.max.messages.kbytes" = "2097151"
+"fetch.min.bytes" = "1048576"
+"fetch.wait.max.ms" = "500"
+"fetch.message.max.bytes" = "67108864"

@@ -1,0 +1,332 @@
+//! Frame queue of pending frames, which will be accumulated into and sent to
+//! Kafka once their time-to-live expires.
+
+use crate::config::AggregatorConfig;
+use crate::frame::{Event, Frame};
+use crate::metrics::{
+    INCOMING_MESSAGES_DROPPED, INCOMING_MESSAGES_PROCESSED, INCOMING_NEUTRON_EVENTS,
+    IncomingMessageDropReason,
+};
+use flatbuffers::FlatBufferBuilder;
+use isis_streaming_data_types::flatbuffers_generated::events_ev44::Event44Message;
+use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::Pu00Message;
+use isis_streaming_data_types::{DeserializedMessage, deserialize_message, get_schema_id};
+use log::{debug, warn};
+use metrics::counter;
+use rayon::prelude::*;
+use std::collections::VecDeque;
+use std::time::Instant;
+
+/// A queue of frames, ordered by the arrival time of the first ev44 in each frame
+/// in the rawEvents Kafka consumer (which is also ordered by time-to-live).
+#[derive(Debug)]
+pub struct FrameQueue<'a> {
+    /// New frames pushed to back of queue, old frames popped from front of queue
+    frames: VecDeque<Frame>,
+    /// Aggregator configuration
+    config: &'a AggregatorConfig,
+    /// Message ID
+    message_id: i64,
+}
+
+impl<'a> FrameQueue<'a> {
+    pub fn new(config: &'a AggregatorConfig, next_message_id: i64) -> Self {
+        FrameQueue {
+            frames: VecDeque::new(),
+            config,
+            message_id: next_message_id,
+        }
+    }
+
+    /// Current size of queue (number of frames)
+    pub fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Whether the queue is empty
+    pub fn is_empty(&self) -> bool {
+        self.frames.is_empty()
+    }
+
+    pub fn send_expired_frames<F>(&mut self, fbb: &mut FlatBufferBuilder<'_>, mut sink: F)
+    where
+        F: FnMut(i64, &[u8]),
+    {
+        let now = Instant::now();
+        let mut completed_frames = vec![];
+
+        while self.frames.len() > self.config.max_queued_frames() {
+            let completed_frame = self
+                .frames
+                .pop_front()
+                .expect("unreachable; frames is empty after checking a frame exists");
+
+            debug!(
+                "Sending frame as queue is too long (reference_time={}, neutron_events={})",
+                completed_frame.reference_time(),
+                completed_frame.num_events(),
+            );
+            completed_frames.push(completed_frame);
+        }
+
+        while self
+            .frames
+            .front()
+            .map(|f| f.is_ttl_expired(&now))
+            .unwrap_or(false)
+        {
+            let completed_frame = self
+                .frames
+                .pop_front()
+                .expect("unreachable; frames is empty after checking first frame exists");
+
+            debug!(
+                "Sending expired frame (reference_time={}, neutron_events={})",
+                completed_frame.reference_time(),
+                completed_frame.num_events(),
+            );
+            completed_frames.push(completed_frame);
+        }
+
+        if self.config.sort_events_by_tof() {
+            completed_frames
+                .par_iter_mut()
+                .for_each(|completed_frame| completed_frame.sort_by_tof());
+        }
+
+        completed_frames.iter_mut().for_each(|completed_frame| {
+            completed_frame.emit_messages(fbb, &mut self.message_id, self.config, &mut sink);
+        })
+    }
+
+    /// Applies a mutation to a frame with the given reference time.
+    ///
+    /// If a frame with the specified reference time, within a tolerance, is already
+    /// present, the mutation is applied to that frame.
+    ///
+    /// If no such frame is present, then a new frame is inserted and the mutation
+    /// is immediately applied to the new frame. The new frame's expiry time will be
+    /// an offset from the arrival time of the first message which causes the frame to
+    /// be created.
+    fn apply_to_frame<F>(&mut self, reference_time: i64, f: F)
+    where
+        F: FnOnce(&mut Frame),
+    {
+        let frame = match self
+            .frames
+            .iter_mut()
+            .rev() // Start search from the most recent frame; this is where it is most likely to be.
+            .find(|frame| {
+                frame.reference_time().abs_diff(reference_time)
+                    <= self.config.reference_time_tolerance_ns()
+            }) {
+            Some(frame) => frame,
+            None => {
+                self.frames
+                    .push_back(Frame::new(reference_time, self.config));
+                self.frames
+                    .back_mut()
+                    .expect("unreachable; frames is empty after pushing new frame")
+            }
+        };
+
+        f(frame)
+    }
+
+    pub fn process_raw_pu00_metadata_message(&mut self, msg: &Pu00Message) {
+        let reference_time = msg.reference_time();
+        self.apply_to_frame(reference_time, |frame| {
+            if let Some(vetos) = msg.vetos() {
+                frame.add_vetos(vetos);
+            }
+            if let Some(protons_per_pulse) = msg.proton_charge() {
+                frame.set_protons_per_pulse(protons_per_pulse);
+            }
+            if let Some(period_number) = msg.period_number() {
+                frame.set_period(period_number);
+            }
+        })
+    }
+
+    pub fn process_raw_ev44_message(&mut self, msg: &Event44Message) {
+        if msg.reference_time().len() == 1 {
+            self.apply_to_frame(msg.reference_time().get(0), |frame| {
+                if let Some(tofs) = msg.time_of_flight()
+                    && let Some(pixel_ids) = msg.pixel_id()
+                {
+                    counter!(INCOMING_NEUTRON_EVENTS).increment(tofs.len() as u64);
+                    frame.append_events(
+                        tofs.into_iter()
+                            .zip(pixel_ids)
+                            .map(|(tof, pixel)| Event::new(tof, pixel)),
+                    )
+                } else {
+                    warn!("Ignoring event without time_of_flight or pixel_id datasets present")
+                }
+            })
+        } else {
+            warn!(
+                "Ignoring event with unexpected number of reference times: {} (expected a single reference time)",
+                msg.reference_time().len()
+            );
+        }
+    }
+
+    pub fn process_raw_message(&mut self, msg: &[u8]) {
+        match deserialize_message(msg) {
+            Ok(DeserializedMessage::EventDataEv44(data)) => {
+                self.process_raw_ev44_message(&data);
+                counter!(INCOMING_MESSAGES_PROCESSED, "schema" => "ev44").increment(1);
+            }
+            Ok(DeserializedMessage::PulseMetadataPu00(data)) => {
+                self.process_raw_pu00_metadata_message(&data);
+                counter!(INCOMING_MESSAGES_PROCESSED, "schema" => "pu00").increment(1);
+            }
+            Ok(_) => {
+                warn!("Unhandled message type: {:?}", get_schema_id(msg));
+                counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::UNKNOWN_SCHEMA).increment(1);
+            }
+            Err(e) => {
+                warn!("Cannot deserialize message: {e:?}");
+                counter!(INCOMING_MESSAGES_DROPPED, "reason" => IncomingMessageDropReason::FAILED_DESERIALIZE).increment(1);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fake_events::make_fake_flatbuffers_encoded_events;
+    use rand::SeedableRng;
+    use rand::rngs::ChaCha8Rng;
+
+    #[test]
+    fn test_apply_metadata_to_frame() {
+        let config = AggregatorConfig {
+            max_events_per_message: Some(2),
+            reference_time_tolerance_ns: Some(10),
+            ..Default::default()
+        };
+        let mut frame_queue = FrameQueue::new(&config, 10);
+
+        frame_queue.apply_to_frame(1, |frame| {
+            frame.add_vetos(0b11010011);
+            frame.set_period(3);
+        });
+        assert_eq!(frame_queue.len(), 1);
+
+        // Reference time within 10ns of above frame; should add to that same frame
+        // ORing together vetos and overwriting period if provided
+        frame_queue.apply_to_frame(5, |frame| {
+            frame.add_vetos(0b11110000);
+            frame.set_period(5);
+        });
+        assert_eq!(frame_queue.len(), 1);
+
+        // Reference time outside 10ns of first frame; should add a new frame
+        frame_queue.apply_to_frame(15, |frame| {
+            frame.add_vetos(0);
+            frame.set_period(6);
+        });
+        assert_eq!(frame_queue.len(), 2);
+
+        assert_eq!(frame_queue.frames[0].period(), Some(5));
+        assert_eq!(frame_queue.frames[0].vetos(), 0b11110011);
+
+        assert_eq!(frame_queue.frames[1].period(), Some(6));
+        assert_eq!(frame_queue.frames[1].vetos(), 0);
+    }
+
+    #[test]
+    fn test_send_expired_frames() {
+        let config = AggregatorConfig {
+            expiry_offset_ms: Some(0), // Frames expire immediately
+            ..Default::default()
+        };
+        let mut queue = FrameQueue::new(&config, 42);
+
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+
+        let num_messages_frame_1 = 5;
+        let events_per_message_frame_1 = 10;
+        let fake_events_frame_1 = make_fake_flatbuffers_encoded_events(
+            &mut rng,
+            20_000_000,
+            num_messages_frame_1,
+            events_per_message_frame_1,
+        );
+
+        let num_messages_frame_2 = 42;
+        let events_per_message_frame_2 = 73;
+        let fake_events_frame_2 = make_fake_flatbuffers_encoded_events(
+            &mut rng,
+            40_000_000,
+            num_messages_frame_2,
+            events_per_message_frame_2,
+        );
+
+        for msg in fake_events_frame_1.iter() {
+            queue.process_raw_message(&msg);
+        }
+        for msg in fake_events_frame_2.iter() {
+            queue.process_raw_message(&msg);
+        }
+
+        let mut fbb = FlatBufferBuilder::new();
+        let mut captured_messages = vec![];
+        queue.send_expired_frames(&mut fbb, |timestamp, payload| {
+            captured_messages.push((timestamp, payload.to_vec()));
+        });
+
+        // Events should have been aggregated into two separate frames, sending a pu00 and
+        // an ev44 per frame
+        assert_eq!(captured_messages.len(), 4);
+
+        // Timestamps - should be FIFO, first frame processed should be first frame emitted
+        assert_eq!(captured_messages[0].0, 20); // 20 = Conversion of frame 1's ref time to Kafka timestamp
+        assert_eq!(captured_messages[1].0, 20);
+        assert_eq!(captured_messages[2].0, 40); // 40 = Conversion of frame 2's ref time to Kafka timestamp
+        assert_eq!(captured_messages[3].0, 40);
+
+        // Schema IDs
+        assert_eq!(
+            get_schema_id(&captured_messages[0].1),
+            Some(b"pu00".as_ref())
+        );
+        assert_eq!(
+            get_schema_id(&captured_messages[1].1),
+            Some(b"ev44".as_ref())
+        );
+        assert_eq!(
+            get_schema_id(&captured_messages[2].1),
+            Some(b"pu00".as_ref())
+        );
+        assert_eq!(
+            get_schema_id(&captured_messages[3].1),
+            Some(b"ev44".as_ref())
+        );
+
+        match deserialize_message(&captured_messages[1].1) {
+            Ok(DeserializedMessage::EventDataEv44(data)) => {
+                assert_eq!(data.reference_time().get(0), 20_000_000);
+                assert_eq!(
+                    data.time_of_flight().unwrap().len(),
+                    num_messages_frame_1 * events_per_message_frame_1
+                );
+            }
+            _ => panic!("Message didn't deserialize to ev44"),
+        }
+
+        match deserialize_message(&captured_messages[3].1) {
+            Ok(DeserializedMessage::EventDataEv44(data)) => {
+                assert_eq!(data.reference_time().get(0), 40_000_000);
+                assert_eq!(
+                    data.time_of_flight().unwrap().len(),
+                    num_messages_frame_2 * events_per_message_frame_2
+                );
+            }
+            _ => panic!("Message didn't deserialize to ev44"),
+        }
+    }
+}
