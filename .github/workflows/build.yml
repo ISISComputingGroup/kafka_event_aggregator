@@ -55,6 +55,37 @@ jobs:
             target/release/kafka_event_aggregator.pdb
           if-no-files-found: error
           retention-days: 1
+  docs:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v6
+      - name: install stable rust
+        run: rustup install stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build docs
+        run: cargo doc --no-deps
+      - name: Generate index.html
+        shell: cmd
+        # u wot?
+        run: |
+          echo|set /p="<meta http-equiv="refresh" content="0; url=kafka_event_aggregator/">" > target/doc/index.html
+          exit /B 0
+      - name: Upload artifacts (docs)
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs
+          path: |
+            target/doc
+          if-no-files-found: error
+          retention-days: 1
+      - name: Deploy docs
+        uses: peaceiris/actions-gh-pages@v4
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        with:
+          publish_branch: gh-pages
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: target/doc
+          force_orphan: true
   results:
     if: ${{ always() }}
     runs-on: ubuntu-latest
