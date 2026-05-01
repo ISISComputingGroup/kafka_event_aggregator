@@ -18,7 +18,7 @@ metrics = "0.24.3"
 metrics-exporter-prometheus = { version = "0.18.1" }
 isis_streaming_data_types = { version = "0.1.0"}
 flatbuffers = "*"
-rand = { version = "0.10.0", features = ["chacha"] }
+rand = { version = "0.10.1", features = ["chacha"] }
 
 [target.'cfg(windows)'.dependencies]
 rdkafka = { version="0.39.0", features = ["cmake_build"] }
