@@ -1,0 +1,70 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="`kafka_event_aggregator`"><title>kafka_event_aggregator - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-b7b9f40b.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="kafka_event_aggregator" data-themes="" data-resource-suffix="" data-rustdoc-version="1.95.0 (59807616e 2026-04-14)" data-channel="1.95.0" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-b897f86f.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate kafka_event_aggregator</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../kafka_event_aggregator/index.html">kafka_<wbr>event_<wbr>aggregator</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#kafka_event_aggregator" title="`kafka_event_aggregator`"><code>kafka_event_aggregator</code></a><ul><li><a href="#operation" title="Operation">Operation</a></li><li><a href="#events-stream-format" title="`events` stream format"><code>events</code> stream format</a></li><li><a href="#metrics" title="Metrics">Metrics</a></li><li><a href="#logging" title="Logging">Logging</a></li><li><a href="#benchmarks" title="Benchmarks">Benchmarks</a></li><li><a href="#documentation" title="Documentation">Documentation</a></li><li><a href="#configuration" title="Configuration">Configuration</a></li></ul></li></ul><h3><a href="#modules">Crate Items</a></h3><ul class="block"><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>kafka_<wbr>event_<wbr>aggregator</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/kafka_event_aggregator/lib.rs.html#1-85">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="kafka_event_aggregator"><a class="doc-anchor" href="#kafka_event_aggregator">§</a><code>kafka_event_aggregator</code></h2>
+<p>This program <em>aggregates</em> events from a <code>_rawEvents</code> Kafka topic, and emits
+events onto an <code>_events</code> topic. It is responsible for zipping together events
+and metadata messages emitted by different sources into “frames”.</p>
+<h3 id="operation"><a class="doc-anchor" href="#operation">§</a>Operation</h3>
+<p>When data arrives on <code>config.input_topic</code> (usually <code>_rawEvents</code>), <code>kafka_event_aggregator</code> will:</p>
+<ul>
+<li>Check whether this data forms part of an existing frame. If not, a new Frame will be created,
+with a time-to-live <code>config.expiry_offset_ms</code> in the future.</li>
+<li>Append neutron events from the new data, or combine veto statuses from the new data, with the
+existing or newly-created frame</li>
+</ul>
+<p>When a frame of data’s time-to-live expires, and the next <code>config.frame_queue_poll_interval</code>
+timer interval expires, <code>kafka_event_aggregator</code> will:</p>
+<ul>
+<li>Sort the events in the frame by increasing time of flight</li>
+<li>Emit a <code>pu00</code> frame metadata message to the <code>config.output_topic</code> (usually <code>_events</code>) stream</li>
+<li>Emit zero or more <code>ev44</code> messages, each containing at most <code>config.max_events_per_message</code>
+neutron events per <code>ev44</code> message.</li>
+</ul>
+<h3 id="events-stream-format"><a class="doc-anchor" href="#events-stream-format">§</a><code>events</code> stream format</h3>
+<p>Consumers of the <code>_events</code> stream may make the following assumptions:</p>
+<ul>
+<li>When the stream is sorted by <code>message_id</code>, the most recently seen <code>pu00</code> message contains the
+metadata relevant to the neutron events until the next <code>pu00</code> message. The messages are
+emitted in order by <code>message_id</code>, but if the <code>_events</code> stream is distributed across multiple
+Kafka partitions then it is not guaranteed to be received in order.
+If the <code>_events</code> stream is on a single partition, and <code>enable.idempotence = true</code> in the
+producer, then ordering by <code>message_id</code> is equivalent to the message order in Kafka</li>
+<li>Events will be emitted ordered in time-of-flight, both within a single <code>ev44</code> message and
+across multiple <code>ev44</code> messages within one frame, if <code>config.sort_events_by_tof = true</code>.</li>
+<li>Each <code>ev44</code> on the <code>_events</code> stream will contain at most <code>max_events_per_message</code> events</li>
+<li>The <code>reference_time</code> of all <code>pu00</code> and <code>ev44</code> messages which make up a frame will be
+identical.</li>
+</ul>
+<p>For the avoidance of doubt, it is <strong>not</strong> correct to assume that:</p>
+<ul>
+<li>Each frame will only contain one <code>ev44</code>. This may be true when count rate is small, but may
+not be true for instruments with a high count rate.</li>
+<li>A frame will contain an <code>ev44</code>. If all events are vetoed, no <code>ev44</code> messages will be emitted.
+(A <code>pu00</code> frame metadata message will still be emitted, containing the veto flags).</li>
+<li>Frames will be emitted in increasing order of reference time. Due to the underlying UDP
+connection from the streaming hardware, this cannot be guaranteed (but is expected to be
+true <em>most</em> of the time).</li>
+<li>A frame must be “complete” to be emitted. Due to the underlying UDP connection from the
+streaming hardware, and the fact that each streaming detector may emit any number of event
+messages, it is not possible to tell whether all data from a frame has been
+received. It is <strong>assumed</strong> that all data corresponding to a frame will appear in the <code>events</code>
+stream within <code>config.expiry_offset_ms</code> of the <em>first</em> message for that frame arriving.
+Events that come in too late are dropped.</li>
+</ul>
+<h3 id="metrics"><a class="doc-anchor" href="#metrics">§</a>Metrics</h3>
+<p>Prometheus-compatible metrics are provided by a scrape endpoint, configured by
+<code>config.metrics_bind_addr</code>. This endpoint can also be accessed by curl or a standard web
+browser.</p>
+<h3 id="logging"><a class="doc-anchor" href="#logging">§</a>Logging</h3>
+<p><code>kafka_event_aggregator</code> accepts command-line <code>-v</code> and <code>-q</code> flags to increase and decrease
+logging verbosity respectively. The flags may be supplied multiple times.</p>
+<h3 id="benchmarks"><a class="doc-anchor" href="#benchmarks">§</a>Benchmarks</h3>
+<p>A benchmark of the full aggregation process is available in the <code>benchmarks/</code> folder, and
+is run using <code>cargo bench</code>.</p>
+<h3 id="documentation"><a class="doc-anchor" href="#documentation">§</a>Documentation</h3>
+<p><code>cargo doc --no-deps --open</code>.</p>
+<h3 id="configuration"><a class="doc-anchor" href="#configuration">§</a>Configuration</h3>
+<p>An example config file is provided in <code>config_example.toml</code>. This may be copied to <code>config.toml</code>
+and adjusted to taste.</p>
+<p>The aggregator is then run with:
+<code>kafka_event_aggregator --config path/to/config.toml</code></p>
+</div></details><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="config/index.html" title="mod kafka_event_aggregator::config">config</a></dt><dd>Config-handling utilities</dd><dt><a class="mod" href="fake_events/index.html" title="mod kafka_event_aggregator::fake_events">fake_<wbr>events</a></dt><dd>Utilities for generating fake event messages.</dd><dt><a class="mod" href="frame/index.html" title="mod kafka_event_aggregator::frame">frame</a></dt><dd>Internal representation of a frame of data.</dd><dt><a class="mod" href="kafka/index.html" title="mod kafka_event_aggregator::kafka">kafka</a></dt><dd>Kafka utilities.</dd><dt><a class="mod" href="metrics/index.html" title="mod kafka_event_aggregator::metrics">metrics</a></dt><dd>Prometheus-compatible metrics export.</dd><dt><a class="mod" href="queue/index.html" title="mod kafka_event_aggregator::queue">queue</a></dt><dd>Frame queue of pending frames, which will be accumulated into and sent to
+Kafka once their time-to-live expires.</dd></dl></section></div></main></body></html>

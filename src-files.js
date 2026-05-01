@@ -1,0 +1,2 @@
+createSrcSidebar('[["kafka_event_aggregator",["",[],["config.rs","fake_events.rs","frame.rs","kafka.rs","lib.rs","metrics.rs","queue.rs"]]]]');
+//{"start":19,"fragment_lengths":[120]}
