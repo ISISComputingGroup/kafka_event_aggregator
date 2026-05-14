@@ -20,7 +20,6 @@ pub const OUTGOING_DROPPED_NEUTRON_EVENTS: &str = "aggregator_outgoing_dropped_n
 
 pub const OUTGOING_KAFKA_ERRORS: &str = "aggregator_outgoing_kafka_errors";
 pub const QUEUE_FRAMES: &str = "aggregator_queue_frames";
-pub const LATEST_MESSAGE_ID: &str = "aggregator_latest_message_id";
 
 pub struct IncomingMessageDropReason {}
 

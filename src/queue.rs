@@ -7,6 +7,7 @@ use crate::metrics::{
     INCOMING_MESSAGES_DROPPED, INCOMING_MESSAGES_PROCESSED, INCOMING_NEUTRON_EVENTS,
     IncomingMessageDropReason,
 };
+use crate::output_message::OutputMessage;
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::Event44Message;
 use isis_streaming_data_types::flatbuffers_generated::pulse_metadata_pu00::Pu00Message;
@@ -15,6 +16,7 @@ use log::{debug, warn};
 use metrics::counter;
 use rayon::prelude::*;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 /// A queue of frames, ordered by the arrival time of the first ev44 in each frame
@@ -25,8 +27,10 @@ pub struct FrameQueue<'a> {
     frames: VecDeque<Frame>,
     /// Aggregator configuration
     config: &'a AggregatorConfig,
-    /// Message ID
+    /// Next message ID
     message_id: i64,
+    /// Next frame ID
+    frame_id: AtomicU64,
 }
 
 impl<'a> FrameQueue<'a> {
@@ -35,6 +39,7 @@ impl<'a> FrameQueue<'a> {
             frames: VecDeque::new(),
             config,
             message_id: next_message_id,
+            frame_id: AtomicU64::new(0),
         }
     }
 
@@ -50,7 +55,7 @@ impl<'a> FrameQueue<'a> {
 
     pub fn send_expired_frames<F>(&mut self, fbb: &mut FlatBufferBuilder<'_>, mut sink: F)
     where
-        F: FnMut(i64, &[u8]),
+        F: FnMut(OutputMessage),
     {
         let now = Instant::now();
         let mut completed_frames = vec![];
@@ -122,8 +127,11 @@ impl<'a> FrameQueue<'a> {
             }) {
             Some(frame) => frame,
             None => {
-                self.frames
-                    .push_back(Frame::new(reference_time, self.config));
+                self.frames.push_back(Frame::new(
+                    reference_time,
+                    self.frame_id.fetch_add(1, Ordering::Relaxed),
+                    self.config,
+                ));
                 self.frames
                     .back_mut()
                     .expect("unreachable; frames is empty after pushing new frame")
@@ -275,8 +283,8 @@ mod tests {
 
         let mut fbb = FlatBufferBuilder::new();
         let mut captured_messages = vec![];
-        queue.send_expired_frames(&mut fbb, |timestamp, payload| {
-            captured_messages.push((timestamp, payload.to_vec()));
+        queue.send_expired_frames(&mut fbb, |msg| {
+            captured_messages.push((msg.kafka_timestamp, msg.payload.to_vec()));
         });
 
         // Events should have been aggregated into two separate frames, sending a pu00 and
