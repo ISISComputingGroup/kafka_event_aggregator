@@ -12,7 +12,7 @@ jobs:
         os: [ "ubuntu-latest", "windows-latest" ]
       fail-fast: false
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: 'recursive'
       - uses: Nugine/setup-flatc@e7855e994773ce90094a3f1626d4afc9080c23ae
@@ -36,7 +36,7 @@ jobs:
       - name: Clippy
         run: cargo clippy -- --deny warnings
       - name: Upload artifacts (debug)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ format('debug-{0}', matrix.os) }}
           path: |
@@ -46,7 +46,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       - name: Upload artifacts (release)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ format('release-{0}', matrix.os) }}
           path: |
@@ -55,11 +55,40 @@ jobs:
             target/release/kafka_event_aggregator.pdb
           if-no-files-found: error
           retention-days: 1
+  docs:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v6
+      - name: install stable rust
+        run: rustup install stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build docs
+        run: cargo doc --no-deps
+      - name: Generate index.html
+        # u wot?
+        run: |
+          echo '<meta http-equiv="refresh" content="0; url=kafka_event_aggregator/">' > target/doc/index.html
+      - name: Upload artifacts (docs)
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs
+          path: |
+            target/doc
+          if-no-files-found: error
+          retention-days: 1
+      - name: Deploy docs
+        uses: peaceiris/actions-gh-pages@v4
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        with:
+          publish_branch: gh-pages
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: target/doc
+          force_orphan: true
   results:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     name: Final Results
-    needs: [tests]
+    needs: [tests, docs]
     steps:
     - run: exit 1
       # see https://stackoverflow.com/a/67532120/4907315

@@ -1,7 +1,8 @@
 //! # `kafka_event_aggregator`
 //!
 //! This program _aggregates_ events from a `_rawEvents` Kafka topic, and emits
-//! events onto an `_events` topic.
+//! events onto an `_events` topic. It is responsible for zipping together events
+//! and metadata messages emitted by different sources into "frames".
 //!
 //! ## Operation
 //!
@@ -87,6 +88,14 @@
 //! ## Documentation
 //!
 //! `cargo doc --no-deps --open`.
+//!
+//! ## Configuration
+//!
+//! An example config file is provided in `config_example.toml`. This may be copied to `config.toml`
+//! and adjusted to taste.
+//!
+//! The aggregator is then run with:
+//! `kafka_event_aggregator --config path/to/config.toml`
 
 pub mod config;
 pub mod fake_events;

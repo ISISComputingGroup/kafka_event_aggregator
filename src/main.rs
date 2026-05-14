@@ -1,7 +1,6 @@
 use clap::Parser;
 use flatbuffers::FlatBufferBuilder;
 use futures::stream::StreamExt;
-use kafka_event_aggregator::config::config_from_str;
 use kafka_event_aggregator::kafka::{get_most_recent_message_id, make_consumer, make_producer};
 use kafka_event_aggregator::metrics::{
     INCOMING_MESSAGE_SIZE, INCOMING_MESSAGES_DROPPED, IncomingMessageDropReason,
@@ -36,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
         .format_timestamp_micros()
         .init();
 
-    let config = config_from_str(&std::fs::read_to_string(args.config)?)?;
+    let config = toml::from_str(&std::fs::read_to_string(args.config)?)?;
 
     initialize_metrics(&config)?;
 

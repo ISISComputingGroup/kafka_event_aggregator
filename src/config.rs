@@ -126,10 +126,6 @@ impl AggregatorConfig {
     }
 }
 
-pub fn config_from_str(data: &str) -> Result<AggregatorConfig, toml::de::Error> {
-    toml::from_str(data)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
