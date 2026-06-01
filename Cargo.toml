@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread", "signal"] }
 futures = "0.3.32"
-log = "0.4.29"
+log = "0.4.30"
 env_logger = "0.11.10"
 rayon = "1.12.0"
 serde = "1.0.228"
@@ -14,9 +14,9 @@ toml = "1.1.2"
 clap = { version = "4.6.1", features = ["derive"] }
 clap-verbosity-flag = "3.0.4"
 anyhow = "1.0.102"
-metrics = "0.24.3"
+metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.1" }
-isis_streaming_data_types = { version = "0.1.0"}
+isis_streaming_data_types = { version = "0.1.1"}
 flatbuffers = "*"
 rand = { version = "0.10.1", features = ["chacha"] }
 
