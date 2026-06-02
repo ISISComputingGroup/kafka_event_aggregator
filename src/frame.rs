@@ -5,6 +5,7 @@ use crate::metrics::{
     OUTGOING_DROPPED_FRAMES, OUTGOING_DROPPED_NEUTRON_EVENTS, OUTGOING_FRAMES, OUTGOING_MESSAGES,
     OUTGOING_NEUTRON_EVENTS, OutgoingFrameDropReason,
 };
+use crate::output_message::OutputMessage;
 use flatbuffers::FlatBufferBuilder;
 use isis_streaming_data_types::flatbuffers_generated::events_ev44::{
     Event44Message, Event44MessageArgs, finish_event_44_message_buffer,
@@ -50,14 +51,17 @@ pub struct Frame {
     events: Vec<Event>,
     /// Frame expiry deadline
     ttl_deadline: Instant,
+    /// Frame identifier
+    frame_id: u64,
 }
 
 impl Frame {
     /// Create a new frame with the specified reference time and a TTL deadline
     /// `expiry_offset_ms` from now.
-    pub fn new(reference_time: i64, config: &AggregatorConfig) -> Self {
+    pub fn new(reference_time: i64, frame_id: u64, config: &AggregatorConfig) -> Self {
         Frame {
             reference_time,
+            frame_id,
             ttl_deadline: Instant::now() + Duration::from_millis(config.expiry_offset_ms()),
             period: None,
             vetos: 0,
@@ -133,7 +137,7 @@ impl Frame {
         config: &AggregatorConfig,
         sink: F,
     ) where
-        F: FnOnce(i64, &[u8]),
+        F: FnOnce(OutputMessage),
     {
         fbb.reset();
         let args = Pu00MessageArgs {
@@ -147,7 +151,12 @@ impl Frame {
 
         let pu00 = Pu00Message::create(fbb, &args);
         finish_pu_00_message_buffer(fbb, pu00);
-        sink(self.kafka_timestamp(), fbb.finished_data());
+        let msg = OutputMessage {
+            payload: fbb.finished_data(),
+            kafka_timestamp: self.kafka_timestamp(),
+            key: self.frame_id,
+        };
+        sink(msg);
         counter!(OUTGOING_MESSAGES, "schema" => "pu00").increment(1);
     }
 
@@ -160,7 +169,7 @@ impl Frame {
         config: &AggregatorConfig,
         sink: F,
     ) where
-        F: FnOnce(i64, &[u8]),
+        F: FnOnce(OutputMessage),
     {
         fbb.reset();
         let tofs = fbb.create_vector(&events.iter().map(|e| e.time_of_flight).collect::<Vec<_>>());
@@ -177,7 +186,12 @@ impl Frame {
 
         let ev44 = Event44Message::create(fbb, &args);
         finish_event_44_message_buffer(fbb, ev44);
-        sink(self.kafka_timestamp(), fbb.finished_data());
+        let msg = OutputMessage {
+            payload: fbb.finished_data(),
+            kafka_timestamp: self.kafka_timestamp(),
+            key: self.frame_id,
+        };
+        sink(msg);
         counter!(OUTGOING_MESSAGES, "schema" => "ev44").increment(1);
     }
 
@@ -189,7 +203,7 @@ impl Frame {
         config: &AggregatorConfig,
         mut sink: F,
     ) where
-        F: FnMut(i64, &[u8]),
+        F: FnMut(OutputMessage),
     {
         if self.protons_per_pulse.is_none() || self.period.is_none() {
             warn!(
@@ -249,6 +263,7 @@ mod tests {
             protons_per_pulse: Some(123.456),
             reference_time: 123456,
             ttl_deadline: Instant::now(),
+            frame_id: 0,
         };
 
         let mut fbb = FlatBufferBuilder::new();
@@ -259,7 +274,7 @@ mod tests {
                 max_events_per_message: Some(2),
                 ..Default::default()
             },
-            |_, e| captured_messages.push(e.to_vec()),
+            |e| captured_messages.push(e.payload.to_vec()),
         );
 
         assert_eq!(captured_messages.len(), 3);
@@ -298,6 +313,7 @@ mod tests {
     fn test_to_kafka_timestamp() {
         let frame = Frame::new(
             123_456_789_000_000,
+            0,
             &AggregatorConfig {
                 ..Default::default()
             },
@@ -308,6 +324,7 @@ mod tests {
     #[test]
     fn test_sort_by_tof() {
         let mut frame = Frame::new(
+            0,
             0,
             &AggregatorConfig {
                 ..Default::default()
@@ -347,6 +364,7 @@ mod tests {
     fn test_is_ttl_expired() {
         let frame1 = Frame::new(
             123_456_789_000_000,
+            0,
             &AggregatorConfig {
                 expiry_offset_ms: Some(5000),
                 ..Default::default()
@@ -356,6 +374,7 @@ mod tests {
 
         let frame2 = Frame::new(
             123_456_789_000_000,
+            0,
             &AggregatorConfig {
                 expiry_offset_ms: Some(5000),
                 ..Default::default()
@@ -367,6 +386,7 @@ mod tests {
     #[test]
     fn test_add_vetos() {
         let mut frame = Frame::new(
+            0,
             0,
             &AggregatorConfig {
                 ..Default::default()
@@ -387,7 +407,7 @@ mod tests {
         let config = AggregatorConfig {
             ..Default::default()
         };
-        let mut frame = Frame::new(0, &config);
+        let mut frame = Frame::new(0, 0, &config);
 
         frame.append_events(
             [Event {
@@ -400,8 +420,8 @@ mod tests {
         let mut captured_messages = vec![];
 
         let mut fbb = FlatBufferBuilder::new();
-        frame.emit_messages(&mut fbb, &mut 0, &config, |timestamp, payload| {
-            captured_messages.push((timestamp, payload.to_vec()));
+        frame.emit_messages(&mut fbb, &mut 0, &config, |msg| {
+            captured_messages.push((msg.kafka_timestamp, msg.payload.to_vec()));
         });
 
         assert_eq!(captured_messages.len(), 0);
