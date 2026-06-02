@@ -96,11 +96,11 @@
 //!
 //! The aggregator is then run with:
 //! `kafka_event_aggregator --config path/to/config.toml`
-//! 
+//!
 //! ### Passing configuration to container
-//! 
+//!
 //! If you are using the container and want to pass a config file as above you need to mount it as a volume at runtime.
-//! You can do this like so: 
+//! You can do this like so:
 //! `docker build . -t kae:latest && docker run -v ./config.toml:/config.toml -it kae:latest --config ./config.toml`
 
 pub mod config;
