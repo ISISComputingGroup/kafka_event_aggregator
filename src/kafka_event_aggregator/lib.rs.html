@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/lib.rs`."><title>lib.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="kafka_event_aggregator" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0 (ac68faa20 2026-05-25)" data-channel="1.96.0" data-search-js="search-b5634cc7.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">kafka_event_aggregator/</div>lib.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # `kafka_event_aggregator`
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! This program _aggregates_ events from a `_rawEvents` Kafka topic, and emits
+<a href=#4 id=4 data-nosnippet>4</a>//! events onto an `_events` topic. It is responsible for zipping together events
+<a href=#5 id=5 data-nosnippet>5</a>//! and metadata messages emitted by different sources into "frames".
+<a href=#6 id=6 data-nosnippet>6</a>//!
+<a href=#7 id=7 data-nosnippet>7</a>//! ## Operation
+<a href=#8 id=8 data-nosnippet>8</a>//!
+<a href=#9 id=9 data-nosnippet>9</a>//! When data arrives on `config.input_topic` (usually `_rawEvents`), `kafka_event_aggregator` will:
+<a href=#10 id=10 data-nosnippet>10</a>//! - Check whether this data forms part of an existing frame. If not, a new Frame will be created,
+<a href=#11 id=11 data-nosnippet>11</a>//!   with a time-to-live `config.expiry_offset_ms` in the future.
+<a href=#12 id=12 data-nosnippet>12</a>//! - Append neutron events from the new data, or combine veto statuses from the new data, with the
+<a href=#13 id=13 data-nosnippet>13</a>//!   existing or newly-created frame
+<a href=#14 id=14 data-nosnippet>14</a>//!
+<a href=#15 id=15 data-nosnippet>15</a>//! When a frame of data's time-to-live expires, and the next `config.frame_queue_poll_interval`
+<a href=#16 id=16 data-nosnippet>16</a>//! timer interval expires, `kafka_event_aggregator` will:
+<a href=#17 id=17 data-nosnippet>17</a>//! - Sort the events in the frame by increasing time of flight
+<a href=#18 id=18 data-nosnippet>18</a>//! - Emit a `pu00` frame metadata message to the `config.output_topic` (usually `_events`) stream
+<a href=#19 id=19 data-nosnippet>19</a>//! - Emit zero or more `ev44` messages, each containing at most `config.max_events_per_message`
+<a href=#20 id=20 data-nosnippet>20</a>//!   neutron events per `ev44` message.
+<a href=#21 id=21 data-nosnippet>21</a>//!
+<a href=#22 id=22 data-nosnippet>22</a>//! ## `events` stream format
+<a href=#23 id=23 data-nosnippet>23</a>//!
+<a href=#24 id=24 data-nosnippet>24</a>//! Consumers of the `_events` stream may make the following assumptions:
+<a href=#25 id=25 data-nosnippet>25</a>//! - Each frame is made of one `pu00` message and any number of `ev44` messages.
+<a href=#26 id=26 data-nosnippet>26</a>//! - All messages in each frame will go to the same Kafka partition (the messages that make up
+<a href=#27 id=27 data-nosnippet>27</a>//!   a frame all have the same Kafka message key).
+<a href=#28 id=28 data-nosnippet>28</a>//! - Messages are produced to Kafka using an idempotent producer (enable.idempotence = true),
+<a href=#29 id=29 data-nosnippet>29</a>//!   ensuring that retries do not create duplicate messages. Kafka guarantees in-order delivery
+<a href=#30 id=30 data-nosnippet>30</a>//!   within each partition.
+<a href=#31 id=31 data-nosnippet>31</a>//! - Events will be emitted ordered in time-of-flight, both within a single `ev44` message and
+<a href=#32 id=32 data-nosnippet>32</a>//!   across multiple `ev44` messages within one frame, if `config.sort_events_by_tof = true`.
+<a href=#33 id=33 data-nosnippet>33</a>//! - Each `ev44` on the `_events` stream will contain at most `max_events_per_message` events
+<a href=#34 id=34 data-nosnippet>34</a>//! - The `reference_time` of all `pu00` and `ev44` messages which make up a frame will be
+<a href=#35 id=35 data-nosnippet>35</a>//!   identical.
+<a href=#36 id=36 data-nosnippet>36</a>//!
+<a href=#37 id=37 data-nosnippet>37</a>//! For the avoidance of doubt, it is **not** correct to assume that:
+<a href=#38 id=38 data-nosnippet>38</a>//! - Each frame will only contain one `ev44`. This may be true when count rate is small, but may
+<a href=#39 id=39 data-nosnippet>39</a>//!   not be true for instruments with a high count rate.
+<a href=#40 id=40 data-nosnippet>40</a>//! - A frame will contain an `ev44`. If all events are vetoed, no `ev44` messages will be emitted.
+<a href=#41 id=41 data-nosnippet>41</a>//!   (A `pu00` frame metadata message will still be emitted, containing the veto flags).
+<a href=#42 id=42 data-nosnippet>42</a>//! - Frames will be emitted in increasing order of reference time. Due to the underlying UDP
+<a href=#43 id=43 data-nosnippet>43</a>//!   connection from the streaming hardware, this cannot be guaranteed (but is expected to be
+<a href=#44 id=44 data-nosnippet>44</a>//!   true *most* of the time).
+<a href=#45 id=45 data-nosnippet>45</a>//! - A frame must be "complete" to be emitted. Due to the underlying UDP connection from the
+<a href=#46 id=46 data-nosnippet>46</a>//!   streaming hardware, and the fact that each streaming detector may emit any number of event
+<a href=#47 id=47 data-nosnippet>47</a>//!   messages, it is not possible to tell whether all data from a frame has been
+<a href=#48 id=48 data-nosnippet>48</a>//!   received. It is **assumed** that all data corresponding to a frame will appear in the `events`
+<a href=#49 id=49 data-nosnippet>49</a>//!   stream within `config.expiry_offset_ms` of the *first* message for that frame arriving.
+<a href=#50 id=50 data-nosnippet>50</a>//!   Events that come in too late are dropped.
+<a href=#51 id=51 data-nosnippet>51</a>//!
+<a href=#52 id=52 data-nosnippet>52</a>//! ## Consuming from the `_events` stream
+<a href=#53 id=53 data-nosnippet>53</a>//!
+<a href=#54 id=54 data-nosnippet>54</a>//! The recommended approach to consume from the events stream, while accounting for frame
+<a href=#55 id=55 data-nosnippet>55</a>//! metadata (vetoes, period number, proton charge) is to keep a per-partition
+<a href=#56 id=56 data-nosnippet>56</a>//! **array** of the most recently seen frame metadata, keyed by Kafka partition of the message.
+<a href=#57 id=57 data-nosnippet>57</a>//! This metadata applies to all `ev44` event messages on that partition until the next `pu00`
+<a href=#58 id=58 data-nosnippet>58</a>//! arrives.
+<a href=#59 id=59 data-nosnippet>59</a>//!
+<a href=#60 id=60 data-nosnippet>60</a>//! In a live consumer:
+<a href=#61 id=61 data-nosnippet>61</a>//! - When a `pu00` (metadata) `msg` arrives: Update `array[msg.partition]` with the new metadata
+<a href=#62 id=62 data-nosnippet>62</a>//! - When an `ev44` (event data) `msg` arrives: Use `array[msg.partition]` as the metadata for
+<a href=#63 id=63 data-nosnippet>63</a>//!   those neutron events
+<a href=#64 id=64 data-nosnippet>64</a>//!
+<a href=#65 id=65 data-nosnippet>65</a>//! This ensures that each neutron event is associated with the correct metadata, even if the
+<a href=#66 id=66 data-nosnippet>66</a>//! metadata for frame `N+1` arrives between the metadata and the events for frame `N` (which it
+<a href=#67 id=67 data-nosnippet>67</a>//! may, iff those frames are on different partitions).
+<a href=#68 id=68 data-nosnippet>68</a>//!
+<a href=#69 id=69 data-nosnippet>69</a>//! This approach also works across multiple consumer processes: a consumer will receive all
+<a href=#70 id=70 data-nosnippet>70</a>//! messages from a single frame, but different frames may be processed by different consumers.
+<a href=#71 id=71 data-nosnippet>71</a>//!
+<a href=#72 id=72 data-nosnippet>72</a>//! ## Metrics
+<a href=#73 id=73 data-nosnippet>73</a>//!
+<a href=#74 id=74 data-nosnippet>74</a>//! Prometheus-compatible metrics are provided by a scrape endpoint, configured by
+<a href=#75 id=75 data-nosnippet>75</a>//! `config.metrics_bind_addr`. This endpoint can also be accessed by curl or a standard web
+<a href=#76 id=76 data-nosnippet>76</a>//! browser.
+<a href=#77 id=77 data-nosnippet>77</a>//!
+<a href=#78 id=78 data-nosnippet>78</a>//! ## Logging
+<a href=#79 id=79 data-nosnippet>79</a>//!
+<a href=#80 id=80 data-nosnippet>80</a>//! `kafka_event_aggregator` accepts command-line `-v` and `-q` flags to increase and decrease
+<a href=#81 id=81 data-nosnippet>81</a>//! logging verbosity respectively. The flags may be supplied multiple times.
+<a href=#82 id=82 data-nosnippet>82</a>//!
+<a href=#83 id=83 data-nosnippet>83</a>//! ## Benchmarks
+<a href=#84 id=84 data-nosnippet>84</a>//!
+<a href=#85 id=85 data-nosnippet>85</a>//! A benchmark of the full aggregation process is available in the `benchmarks/` folder, and
+<a href=#86 id=86 data-nosnippet>86</a>//! is run using `cargo bench`.
+<a href=#87 id=87 data-nosnippet>87</a>//!
+<a href=#88 id=88 data-nosnippet>88</a>//! ## Documentation
+<a href=#89 id=89 data-nosnippet>89</a>//!
+<a href=#90 id=90 data-nosnippet>90</a>//! `cargo doc --no-deps --open`.
+<a href=#91 id=91 data-nosnippet>91</a>//!
+<a href=#92 id=92 data-nosnippet>92</a>//! ## Configuration
+<a href=#93 id=93 data-nosnippet>93</a>//!
+<a href=#94 id=94 data-nosnippet>94</a>//! An example config file is provided in `config_example.toml`. This may be copied to `config.toml`
+<a href=#95 id=95 data-nosnippet>95</a>//! and adjusted to taste.
+<a href=#96 id=96 data-nosnippet>96</a>//!
+<a href=#97 id=97 data-nosnippet>97</a>//! The aggregator is then run with:
+<a href=#98 id=98 data-nosnippet>98</a>//! `kafka_event_aggregator --config path/to/config.toml`
+<a href=#99 id=99 data-nosnippet>99</a>//!
+<a href=#100 id=100 data-nosnippet>100</a>//! ### Passing configuration to container
+<a href=#101 id=101 data-nosnippet>101</a>//!
+<a href=#102 id=102 data-nosnippet>102</a>//! If you are using the container and want to pass a config file as above you need to mount it as a volume at runtime.
+<a href=#103 id=103 data-nosnippet>103</a>//! You can do this like so:
+<a href=#104 id=104 data-nosnippet>104</a>//! `docker build . -t kae:latest &amp;&amp; docker run -v ./config.toml:/config.toml -it kae:latest --config ./config.toml`
+<a href=#105 id=105 data-nosnippet>105</a>
+<a href=#106 id=106 data-nosnippet>106</a></span><span class="kw">pub mod </span>config;
+<a href=#107 id=107 data-nosnippet>107</a><span class="kw">pub mod </span>fake_events;
+<a href=#108 id=108 data-nosnippet>108</a><span class="kw">pub mod </span>frame;
+<a href=#109 id=109 data-nosnippet>109</a><span class="kw">pub mod </span>kafka;
+<a href=#110 id=110 data-nosnippet>110</a><span class="kw">pub mod </span>metrics;
+<a href=#111 id=111 data-nosnippet>111</a><span class="kw">pub mod </span>output_message;
+<a href=#112 id=112 data-nosnippet>112</a><span class="kw">pub mod </span>queue;
+</code></pre></div></section></main></body></html>
