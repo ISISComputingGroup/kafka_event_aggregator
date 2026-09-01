@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: Nugine/setup-flatc@e7855e994773ce90094a3f1626d4afc9080c23ae
+      - uses: Nugine/setup-flatc@87c2f5328c9d49c3fb34781d56a434d0d0bc2508
         with:
           version: "25.12.19"
       - name: install stable rust
