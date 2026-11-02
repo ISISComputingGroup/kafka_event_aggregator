@@ -207,9 +207,11 @@ impl Frame {
     {
         if self.protons_per_pulse.is_none() || self.period.is_none() {
             warn!(
-                "Failed to emit partial frame; required metadata for this frame was not present. \
+                "Failed to emit partial frame (t={}, num_events={}); required metadata for this frame was not present. \
             This can occur if an event message and it's corresponding metadata are not \
-            received within expiry_offset_ms of each other."
+            received within expiry_offset_ms of each other.",
+                self.reference_time,
+                self.events.len()
             );
             counter!(OUTGOING_DROPPED_FRAMES, "reason" => OutgoingFrameDropReason::NO_METADATA)
                 .increment(1);
